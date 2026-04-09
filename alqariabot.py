@@ -1,3 +1,4 @@
+# alqariabot.py (النسخة النهائية والمصححة)
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,9 +8,8 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 import os
 from flask import Flask
-import threading
 import re
-import database  # ★★★ جديد: استيراد ملف قاعدة البيانات
+import database  # استيراد ملف قاعدة البيانات
 
 # --- 1. الإعدادات الأساسية ---
 logging.basicConfig(
@@ -17,30 +17,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = "8605134357:AAGC44E2Fw6ljwGFok3zcg_FuVJKnegk0q4"
-ADMIN_CHAT_ID = "1602450100"
+# ★★★ استخدم متغيرات البيئة على Render لهذه القيم ★★★
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "8605134357:AAGC44E2Fw6ljwGFok3zcg_FuVJKnegk0q4")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "1602450100")
 
-# ★★★ جديد: تعريف حالات المحادثة للوحة تحكم المدير ★★★
+# تعريف حالات المحادثة للوحة تحكم المدير
 (ADMIN_PANEL, SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT, GET_NEW_PRICE) = range(4)
 
 # --- 2. الدوال المساعدة والواجهة ---
-# تم نقل get_item_details إلى database.py
-
 def escape_markdown(text: str) -> str:
-    # ... (الدالة تبقى كما هي)
     escape_chars = r'_*[]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 def format_invoice(cart: dict) -> tuple[str, int, int]:
-    # ... (الدالة تبقى كما هي، لكنها تستدعي database.get_item_details)
     if not cart:
         return "", 0, 0
-    # ... (بقية الكود يعمل كما هو)
     total_items_price = 0
     total_delivery_price = 0
     items_table = ""
     for p_id, qty in cart.items():
-        item = database.get_item_details(p_id) # ★★★ تعديل: استخدام قاعدة البيانات
+        item = database.get_item_details(p_id)
         if item:
             item_total = item["price"] * qty
             total_items_price += item_total
@@ -50,7 +46,6 @@ def format_invoice(cart: dict) -> tuple[str, int, int]:
             price = str(item['price']).ljust(6)
             total = str(item_total).ljust(7)
             items_table += f"| {name}| {quantity}| {price}| {total}|\n"
-    # ... (بقية كود الفاتورة)
     grand_total = total_items_price + total_delivery_price
     invoice_text = "```\n"
     invoice_text += "+-------------------------------------------+\n| فاتورة الطلب                             |\n+-----------------+-------+-------+---------+\n| الصنف           | الكمية| السعر | الإجمالي |\n+-----------------+-------+-------+---------+\n"
@@ -61,30 +56,31 @@ def format_invoice(cart: dict) -> tuple[str, int, int]:
     invoice_text += "```"
     return invoice_text, total_items_price, total_delivery_price
 
-
 def is_admin(update: Update) -> bool:
-    return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
+    user_id = update.effective_user.id
+    return str(user_id) == str(ADMIN_CHAT_ID)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.setdefault('cart', {})
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_products")],
         [InlineKeyboardButton(f"🛍️ عرض سلتي ({len(context.user_data.get('cart', {}))})", callback_data="view_cart")],
     ]
-    # ★★★ جديد: إضافة زر لوحة التحكم للمدير فقط ★★★
     if is_admin(update):
         keyboard.append([InlineKeyboardButton("👑 لوحة تحكم المدير", callback_data="admin_panel_main")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه للبدء."
+    
+    # تحديد إذا كانت الرسالة جديدة أو تعديل لرسالة قائمة
     if update.callback_query:
         await update.callback_query.edit_message_text(welcome_message, reply_markup=reply_markup)
     else:
         await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+    return 0 # العودة للحالة الرئيسية في المحادثة
 
-# ... (دالة view_cart تبقى كما هي)
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (هذه الدالة لا تحتاج تعديل)
     query = update.callback_query
     cart = context.user_data.get('cart', {})
     if not cart:
@@ -120,8 +116,9 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in view_cart: {e}")
 
-# ★★★ تعديل: دالة الأزرار تقرأ الآن من قاعدة البيانات ★★★
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (هذه الدالة لا تحتاج تعديل)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -129,27 +126,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if data == "main_menu":
         await start(update, context)
-
     elif data == "browse_products":
         categories = database.get_all_categories()
         keyboard = [[InlineKeyboardButton(cat["name"], callback_data=f"cat_{cat['id']}")] for cat in categories]
         keyboard.append([InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")])
         await query.edit_message_text("اختر الفئة:", reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data.startswith("cat_"):
         cat_id = int(data.split("_")[1])
         products = database.get_products_by_category(cat_id)
         keyboard = [[InlineKeyboardButton(f"{p['name']} ({p['price']} ريال)", callback_data=f"add_{p['id']}")] for p in products]
         keyboard.append([InlineKeyboardButton("« العودة للفئات", callback_data="browse_products")])
         await query.edit_message_text("اختر المنتج:", reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data.startswith("add_"):
         prod_id = int(data.split("_")[1])
         cart[prod_id] = cart.get(prod_id, 0) + 1
         context.user_data['cart'] = cart
         await query.answer(f"✅ تمت إضافة المنتج للسلة!", show_alert=False)
-    
-    # ... (بقية الأزرار qty_, clear_cart, confirm_order, approve_, reject_ تبقى كما هي)
     elif data == "view_cart":
         await view_cart(update, context)
     elif data.startswith("qty_"):
@@ -204,25 +196,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             del context.bot_data[order_id]
 
 
-# --- ★★★ الجزء الثاني: لوحة تحكم المدير ★★★ ---
-
+# --- لوحة تحكم المدير ---
 async def admin_panel_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """عرض لوحة التحكم الرئيسية للمدير."""
+    # ... (هذه الدوال لا تحتاج تعديل)
     query = update.callback_query
     if not is_admin(update):
         await query.answer("ليس لديك صلاحية الوصول لهذه المنطقة.", show_alert=True)
         return ConversationHandler.END
-
-    keyboard = [
-        [InlineKeyboardButton("📝 إدارة المنتجات", callback_data="admin_manage_products")],
-        # يمكنك إضافة أزرار أخرى هنا مثل "📊 عرض الإحصائيات"
-        [InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]
-    ]
+    keyboard = [[InlineKeyboardButton("📝 إدارة المنتجات", callback_data="admin_manage_products")], [InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]]
     await query.edit_message_text("👑 *لوحة تحكم المدير*\n\nاختر الإجراء الذي تريده:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
     return ADMIN_PANEL
 
 async def admin_manage_products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """عرض فئات المنتجات للمدير ليختار منها."""
     query = update.callback_query
     categories = database.get_all_categories()
     keyboard = [[InlineKeyboardButton(cat["name"], callback_data=f"admin_cat_{cat['id']}")] for cat in categories]
@@ -231,9 +216,9 @@ async def admin_manage_products(update: Update, context: ContextTypes.DEFAULT_TY
     return SELECT_PRODUCT_TO_EDIT
 
 async def admin_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """عرض منتجات الفئة المختارة للمدير."""
     query = update.callback_query
     cat_id = int(query.data.split("_")[2])
+    context.user_data['admin_last_cat'] = cat_id # حفظ الفئة للعودة إليها
     products = database.get_products_by_category(cat_id)
     keyboard = []
     for p in products:
@@ -244,14 +229,11 @@ async def admin_select_product(update: Update, context: ContextTypes.DEFAULT_TYP
     return EDIT_PRODUCT
 
 async def admin_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """عرض خيارات التعديل للمنتج المختار."""
     query = update.callback_query
     prod_id = int(query.data.split("_")[2])
-    context.user_data['product_to_edit'] = prod_id # حفظ المنتج للتعديلات التالية
-    
+    context.user_data['product_to_edit'] = prod_id
     product = database.get_item_details(prod_id)
     status_text = "إخفاء المنتج" if product['is_available'] else "إظهار المنتج"
-    
     keyboard = [
         [InlineKeyboardButton("✏️ تعديل السعر", callback_data="admin_edit_price")],
         [InlineKeyboardButton(f"👁️ {status_text}", callback_data="admin_toggle_avail")],
@@ -261,16 +243,16 @@ async def admin_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return EDIT_PRODUCT
 
 async def admin_toggle_availability(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """تغيير حالة توفر المنتج (إظهار/إخفاء)."""
     query = update.callback_query
     prod_id = context.user_data['product_to_edit']
     database.toggle_product_availability(prod_id)
     await query.answer("✅ تم تحديث حالة المنتج بنجاح!")
-    # إعادة عرض خيارات التعديل
-    return await admin_edit_product(update, context)
+    # إعادة بناء قائمة المنتجات للعودة
+    cat_id = context.user_data['admin_last_cat']
+    query.data = f"admin_cat_{cat_id}"
+    return await admin_select_product(update, context)
 
 async def admin_prompt_for_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """الطلب من المدير إدخال السعر الجديد."""
     query = update.callback_query
     prod_id = context.user_data['product_to_edit']
     product = database.get_item_details(prod_id)
@@ -278,14 +260,12 @@ async def admin_prompt_for_price(update: Update, context: ContextTypes.DEFAULT_T
     return GET_NEW_PRICE
 
 async def admin_update_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """تحديث السعر في قاعدة البيانات."""
     try:
         new_price = int(update.message.text)
         prod_id = context.user_data['product_to_edit']
         database.update_product_price(prod_id, new_price)
         await update.message.reply_text(f"✅ تم تحديث السعر بنجاح إلى: {new_price}")
         # العودة إلى لوحة التحكم الرئيسية
-        # نحتاج إلى إرسال رسالة جديدة لأننا الآن في محادثة نصية
         keyboard = [[InlineKeyboardButton("👑 العودة للوحة التحكم", callback_data="admin_panel_main")]]
         await update.message.reply_text("يمكنك العودة للوحة التحكم.", reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
@@ -294,73 +274,64 @@ async def admin_update_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return GET_NEW_PRICE
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """إلغاء المحادثة والعودة للقائمة الرئيسية."""
     await start(update, context)
     return ConversationHandler.END
 
 # --- إعداد وتشغيل البوت ---
-def main():
-    # ★★★ جديد: إعداد قاعدة البيانات عند بدء التشغيل ★★★
-    database.setup_database()
+# إعداد تطبيق Flask
+app = Flask(__name__)
+@app.route('/')
+def index():
+    return "Bot is running!"
 
-    application = Application.builder().token(TOKEN).build()
+# إعداد تطبيق البوت
+database.setup_database()
+application = Application.builder().token(TOKEN).build()
 
-    # ★★★ جديد: إضافة محادثة لوحة تحكم المدير ★★★
-    admin_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$')],
-        states={
-            ADMIN_PANEL: [CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$')],
-            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')],
-            EDIT_PRODUCT: [
-                CallbackQueryHandler(admin_prompt_for_price, pattern='^admin_edit_price$'),
-                CallbackQueryHandler(admin_toggle_availability, pattern='^admin_toggle_avail$'),
-                CallbackQueryHandler(admin_select_product, pattern='^admin_cat_') # للعودة
-            ],
-            GET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_update_price)],
-        },
-        fallbacks=[
-            CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$'),
-            CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$'),
-            CallbackQueryHandler(cancel_conversation, pattern='^main_menu$'),
-            CommandHandler('cancel', cancel_conversation)
+# محادثة لوحة تحكم المدير
+admin_conv_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$')],
+    states={
+        ADMIN_PANEL: [CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$')],
+        SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')],
+        EDIT_PRODUCT: [
+            CallbackQueryHandler(admin_prompt_for_price, pattern='^admin_edit_price$'),
+            CallbackQueryHandler(admin_toggle_availability, pattern='^admin_toggle_avail$'),
+            CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')
         ],
-        map_to_parent={
-            # إذا انتهت المحادثة، عد إلى المعالج الرئيسي
-            ConversationHandler.END: 0,
-        }
-    )
-    
-    # معالج رئيسي يحتوي على كل شيء
-    main_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            0: [
-                admin_conv_handler, # دمج محادثة المدير
-                CallbackQueryHandler(button_handler) # بقية الأزرار
-            ]
-        },
-        fallbacks=[CommandHandler("start", start)]
-    )
+        GET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_update_price)],
+    },
+    fallbacks=[
+        CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$'),
+        CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$'),
+        CallbackQueryHandler(cancel_conversation, pattern='^main_menu$'),
+        CommandHandler('start', cancel_conversation)
+    ],
+    map_to_parent={
+        ConversationHandler.END: 0,
+    }
+)
 
-    application.add_handler(main_handler)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: c.bot.send_message(u.effective_chat.id, "للبحث، استخدم زر البحث في القائمة الرئيسية."))) # تعديل البحث لاحقاً
+# المعالج الرئيسي الذي يجمع كل شيء
+main_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        0: [
+            admin_conv_handler,
+            CallbackQueryHandler(button_handler)
+        ]
+    },
+    fallbacks=[CommandHandler("start", start)]
+)
 
-    # ... (كود Flask يبقى كما هو)
-    app = Flask(__name__)
-    @app.route('/')
-    def index():
-        return "Bot is running!"
+application.add_handler(main_handler)
 
-    def run_flask():
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host='0.0.0.0', port=port)
-
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-    
-    logger.info("البوت يعمل الآن...")
+# ★★★ الجزء الأخير والمعدل لمنع التعارض ★★★
+if __name__ == "__main__":
+    # هذا الجزء يعمل فقط عند تشغيل الكود مباشرة على جهازك
+    logger.info("البوت يعمل الآن في وضع Polling (للتجربة المحلية)...")
+    # لا حاجة لتشغيل Flask هنا، فقط البوت
     application.run_polling()
 
-if __name__ == "__main__":
-    main()
-    
+# عندما يتم تشغيل الكود على Render بواسطة gunicorn، سيتم تجاهل `if __name__ == "__main__"`
+# وسيقوم gunicorn باستيراد واستخدام كائن `app` من الأعلى مباشرة.
