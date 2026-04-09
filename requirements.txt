@@ -1,4 +1,2 @@
-python-telegram-bot[job-queue]
-Pillow
+python-telegram-bot
 flask
-gunicorn
