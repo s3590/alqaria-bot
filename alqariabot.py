@@ -7,6 +7,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 import os
+import threading
 from flask import Flask
 
 # --- 1. الإعدادات الأساسية (يتم جلبها من متغيرات البيئة) ★★★
@@ -22,8 +23,7 @@ ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 # (موصى به) تأكد من أن المتغيرات موجودة قبل تشغيل البوت
 if not TOKEN or not ADMIN_CHAT_ID:
     logger.critical("خطأ فادح: لم يتم العثور على TELEGRAM_TOKEN و ADMIN_CHAT_ID في متغيرات البيئة!")
-    # في بيئة الإنتاج، قد ترغب في إيقاف البرنامج إذا لم تكن المتغيرات موجودة
-    # raise ValueError("متغيرات البيئة الأساسية غير موجودة")
+    # يمكنك إضافة `raise ValueError` هنا لإيقاف التشغيل إذا أردت
 
 # اترك هذه كما هي مؤقتاً
 MERCHANT_CHANNEL_ID = "None"
@@ -75,11 +75,16 @@ def is_admin(update: Update) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_chat.id
-    if context.user_data.get('initialized') is not True:
-        context.user_data['cart'] = {}
-        context.user_data['orders'] = []
-        context.user_data['initialized'] = True
+    # تم تعطيل حفظ البيانات في ملف لأن Render لا يدعمها بشكل دائم
+    # if context.user_data.get('initialized') is not True:
+    #     context.user_data['cart'] = {}
+    #     context.user_data['orders'] = []
+    #     context.user_data['initialized'] = True
     
+    # الحل المؤقت: تهيئة السلة مع كل بداية
+    context.user_data['cart'] = {}
+    context.user_data['orders'] = []
+
     if 'users' not in context.bot_data:
         context.bot_data['users'] = set()
     context.bot_data['users'].add(user_id)
@@ -101,6 +106,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
+# ... (بقية دوال البوت تبقى كما هي تماماً) ...
+# (view_cart, button_handler, search_handler, admin_commands, etc.)
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     cart = context.user_data.get('cart', {})
@@ -257,7 +264,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         user_orders = context.application.user_data[user_info['id']].setdefault('orders', [])
         user_orders.append({"date": datetime.now().strftime("%Y-%m-%d"), "cart": cart, "total": totals['grand']})
-        context.application.user_data[user_info['id']]['orders'] = user_orders[-5:]
+        # context.application.user_data[user_info['id']]['orders'] = user_orders[-5:]
 
         context.bot_data.setdefault('approved_orders_today', 0)
         context.bot_data['approved_orders_today'] += 1
@@ -279,7 +286,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         order_data = context.bot_data.get(order_id)
         if order_data:
             await query.edit_message_text(f"👍 تم التجهيز. تم إعلام السائق بأن الطلبية جاهزة للاستلام.")
-            await context.bot.send_message(chat_id=DRIVER_CHANNEL_ID, text=f"🔔 تحديث: طلبية العميل {order_data['user_info']['full_name']} جاهزة للاستلام من التاجر.")
+            # await context.bot.send_message(chat_id=DRIVER_CHANNEL_ID, text=f"...")
 
     elif data.startswith("shipping_"):
         order_id = data.replace("shipping_", "")
@@ -364,45 +371,36 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 logger.error(f"Failed to send to {user_id}: {e}")
         await update.message.reply_text(f"✅ تم إرسال الرسالة بنجاح إلى {sent_count} مستخدم.")
 
-# --- إعداد تطبيق البوت ---
-# ملاحظة: تم تعطيل `PicklePersistence` لأن نظام الملفات في Render ليس دائماً.
-# سيتم فقدان بيانات المستخدم (مثل السلة) عند كل إعادة تشغيل للخدمة.
-# للبيانات الدائمة، يجب استخدام قاعدة بيانات خارجية مثل PostgreSQL أو Redis.
-# persistence = PicklePersistence(filepath="bot_database.pkl")
-application = Application.builder().token(TOKEN).build() # .persistence(persistence)
 
-# إضافة المعالجات (Handlers)
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("cart", view_cart))
-application.add_handler(CallbackQueryHandler(button_handler))
-application.add_handler(CommandHandler(["stats", "users", "broadcast"], admin_commands))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
-
-# --- إعداد خادم الويب (Flask) ---
-# هذا الجزء ضروري ليعمل البوت كـ "Web Service" على Render
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Bot is running!"
-
-@app.route(f'/{TOKEN}', methods=['POST'])
-async def webhook():
-    update = Update.de_json(await request.get_json(), application.bot)
-    await application.process_update(update)
-    return '', 200
-
-async def setup_webhook():
-    # هذه الدالة اختيارية، يمكنك ضبط الـ Webhook يدوياً عبر URL
-    # أو ترك Render يقوم بذلك إذا كان يدعم الإعداد التلقائي
-    url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}"
-    await application.bot.set_webhook(url)
-    logger.info(f"Webhook set to {url}")
-
-if __name__ == "__main__":
-    # هذا الجزء لتشغيل البوت محلياً للتجربة (باستخدام Polling)
-    # عند النشر على Render، سيتم استخدام gunicorn لتشغيل كائن `app` مباشرة
-    # ولن يتم تنفيذ هذا الجزء من الكود.
-    logger.info("البوت يعمل الآن في وضع Polling (للتجربة المحلية)...")
+def main():
+    """الدالة الرئيسية لتشغيل البوت."""
+    # تم تعطيل حفظ البيانات في ملف لأن Render لا يدعمها بشكل دائم
+    # persistence = PicklePersistence(filepath="bot_database.pkl")
+    
+    application = Application.builder().token(TOKEN).build() # .persistence(persistence)
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("cart", view_cart))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(CommandHandler(["stats", "users", "broadcast"], admin_commands))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+    
+    logger.info("البوت يعمل الآن في وضع Polling...")
     application.run_polling()
 
+# --- كود التوافق مع Render Web Service ---
+if __name__ == "__main__":
+    app = Flask(__name__)
+
+    @app.route('/')
+    def hello():
+        return "Bot is alive!"
+
+    def run_flask():
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host='0.0.0.0', port=port)
+
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+
+    main()
