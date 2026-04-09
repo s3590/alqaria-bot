@@ -8,6 +8,7 @@ from telegram.constants import ParseMode
 import os
 from flask import Flask
 import threading
+import re # ★★★ جديد: لاستيراد مكتبة التعامل مع النصوص
 
 # --- 1. الإعدادات الأساسية (املأها هنا مباشرة) ★★★
 logging.basicConfig(
@@ -63,13 +64,12 @@ def get_item_details(prod_id):
             return cat["items"][prod_id]
     return None
 
-def is_admin(update: Update) -> bool:
-    return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
+def escape_markdown(text: str) -> str:
+    """★★★ جديد: دالة لإصلاح مشاكل التنسيق في MarkdownV2 ★★★"""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 def format_invoice(cart: dict) -> tuple[str, int, int]:
-    """
-    ★★★ جديد: دالة لتنسيق الفاتورة بشكل جدولي ★★★
-    """
     if not cart:
         return "", 0, 0
 
@@ -87,8 +87,7 @@ def format_invoice(cart: dict) -> tuple[str, int, int]:
             total_items_price += item_total
             total_delivery_price += item["delivery_fee"] * qty
             
-            # تنسيق السطر ليكون متوافقاً مع الجدول
-            name = item['name'][:14].ljust(14) # قص الاسم لـ 14 حرفاً ومحاذاة
+            name = item['name'][:14].ljust(14)
             quantity = f"x{qty}".ljust(6)
             price = str(item['price']).ljust(6)
             total = str(item_total)
@@ -104,7 +103,7 @@ def format_invoice(cart: dict) -> tuple[str, int, int]:
     return invoice_text, total_items_price, total_delivery_price
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود هنا لم يتغير)
+    context.user_data.setdefault('cart', {})
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_products")],
         [InlineKeyboardButton(f"🛍️ عرض سلتي ({len(context.user_data.get('cart', {}))})", callback_data="view_cart")],
@@ -118,9 +117,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(welcome_message, reply_markup=reply_markup)
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    ★★★ تحديث: لعرض السلة مع أزرار التحكم بجانب كل منتج ★★★
-    """
     query = update.callback_query
     cart = context.user_data.get('cart', {})
 
@@ -133,12 +129,10 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg, reply_markup=markup)
         return
 
-    # استخدام دالة الفاتورة الجديدة
     invoice_text, _, _ = format_invoice(cart)
-    msg = "🛒 **فاتورة طلبك الحالية:**\n" + invoice_text
+    msg = "🛒 *فاتورة طلبك الحالية:*\n" + invoice_text
     
     keyboard = []
-    # إضافة أزرار التحكم لكل منتج
     for p_id, qty in cart.items():
         item = get_item_details(p_id)
         if item:
@@ -154,13 +148,18 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("« متابعة التسوق", callback_data="browse_products")]
     ])
     
-    if query:
-        # التأكد من أن الرسالة تغيرت لتجنب خطأ "Message is not modified"
-        if query.message.text != msg or query.message.reply_markup != InlineKeyboardMarkup(keyboard):
-            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
-    else:
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
-
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        if query:
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception as e:
+        logger.error(f"Error in view_cart: {e}")
+        if query:
+            # في حال فشل التنسيق، اعرض رسالة خطأ بسيطة
+            await query.answer("حدث خطأ أثناء عرض السلة، يرجى المحاولة مرة أخرى.", show_alert=True)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -169,7 +168,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     cart = context.user_data.get('cart', {})
 
     if data == "main_menu":
-        # ... (الكود هنا لم يتغير)
         keyboard = [
             [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_products")],
             [InlineKeyboardButton(f"🛍️ عرض سلتي ({len(cart)})", callback_data="view_cart")],
@@ -177,13 +175,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("القائمة الرئيسية:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "browse_products":
-        # ... (الكود هنا لم يتغير)
         keyboard = [[InlineKeyboardButton(cat["name"], callback_data=f"cat_{cat_id}")] for cat_id, cat in PRODUCTS.items()]
         keyboard.append([InlineKeyboardButton("« العودة", callback_data="main_menu")])
         await query.edit_message_text("اختر القسم الذي تريده:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("cat_"):
-        # ... (الكود هنا لم يتغير)
         cat_id = data.split("_", 1)[1]
         category = PRODUCTS.get(cat_id)
         keyboard = [[InlineKeyboardButton(f"{p['name']} ({p['price']} ريال)", callback_data=f"add_{p_id}")] for p_id, p in category["items"].items()]
@@ -191,7 +187,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(f"منتجات قسم {category['name']}:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("add_"):
-        # ... (الكود هنا لم يتغير)
         prod_id = data.split("_", 1)[1]
         cart[prod_id] = cart.get(prod_id, 0) + 1
         context.user_data['cart'] = cart
@@ -201,7 +196,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await view_cart(update, context)
 
     elif data.startswith("qty_"):
-        # ... (الكود هنا لم يتغير)
         parts = data.split("_")
         action, prod_id = parts[1], "_".join(parts[2:])
         
@@ -219,28 +213,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await view_cart(update, context)
 
     elif data == "clear_cart":
-        # ... (الكود هنا لم يتغير)
         context.user_data['cart'] = {}
         await view_cart(update, context)
 
     elif data == "confirm_order":
-        # ★★★ تحديث: لإرسال الفاتورة المنظمة للمدير ★★★
         if not cart:
             await query.answer("سلتك فارغة!", show_alert=True)
             return
 
         user = query.from_user
-        
-        # استخدام دالة الفاتورة الجديدة
         invoice_text, _, _ = format_invoice(cart)
-
+        
+        # ★★★ إصلاح: استخدام دالة الهروب من التنسيق ★★★
+        escaped_username = escape_markdown(user.full_name)
+        
         admin_approval_msg = (
-            f"🔔 **طلب جديد بانتظار موافقتك**\n\n"
-            f"**العميل:** {user.full_name} (@{user.username})\n\n"
-            f"**الفاتورة:**\n{invoice_text}"
+            f"🔔 *طلب جديد بانتظار موافقتك*\n\n"
+            f"*العميل:* {escaped_username}\n\n"
+            f"*الفاتورة:*\n{invoice_text}"
         )
         
-        # استخدام معرف فريد للطلب
         order_id = f"order_{user.id}_{query.message.message_id}"
         context.bot_data[order_id] = {"cart": cart.copy(), "user_info": user.to_dict()}
 
@@ -251,7 +243,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data['cart'] = {}
 
     elif data.startswith("approve_"):
-        # ... (الكود هنا لم يتغير - تم تعطيل رسائل التاجر والسائق مؤقتاً)
         order_id = data.replace("approve_", "")
         order_data = context.bot_data.get(order_id)
         if not order_data:
@@ -259,25 +250,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
             
         user_info = order_data["user_info"]
-        
         await context.bot.send_message(chat_id=user_info['id'], text="✅ تم تأكيد طلبك وجاري تجهيزه الآن!")
-        await query.edit_message_text(f"✅ تمت الموافقة على طلب العميل {user_info['first_name']}.")
-        del context.bot_data[order_id] # حذف الطلب بعد معالجته
+        await query.edit_message_text(f"✅ تمت الموافقة على طلب العميل {escape_markdown(user_info['first_name'])}\.", parse_mode=ParseMode.MARKDOWN_V2)
+        del context.bot_data[order_id]
 
     elif data.startswith("reject_"):
-        # ... (الكود هنا لم يتغير)
         order_id = data.replace("reject_", "")
         order_data = context.bot_data.get(order_id)
         if order_data:
             user_info = order_data["user_info"]
             await context.bot.send_message(chat_id=user_info['id'], text="❌ نعتذر، لم يتم قبول طلبك الحالي. يمكنك المحاولة لاحقًا أو التواصل مع الإدارة.")
-            await query.edit_message_text(f"❌ تم رفض طلب العميل {user_info['first_name']}.")
+            await query.edit_message_text(f"❌ تم رفض طلب العميل {escape_markdown(user_info['first_name'])}\.", parse_mode=ParseMode.MARKDOWN_V2)
             del context.bot_data[order_id]
 
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    ★★★ جديد: دالة البحث عن المنتجات ★★★
-    """
     search_term = update.message.text.strip().lower()
     if len(search_term) < 2: return
 
@@ -291,17 +277,15 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(f"عذراً، لم يتم العثور على منتجات تطابق بحثك عن '{search_term}'.")
         return
 
-    msg = f"🔍 **نتائج البحث عن '{search_term}':**"
+    msg = f"🔍 *نتائج البحث عن '{escape_markdown(search_term)}':*"
     keyboard = [[InlineKeyboardButton(f"➕ {p_data['name']} ({p_data['price']} ريال)", callback_data=f"add_{p_id}")] for p_id, p_data in results]
-    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
 
 # --- إعداد تطبيق البوت ---
 application = Application.builder().token(TOKEN).build()
 
-# إضافة المعالجات (Handlers)
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
-# ★★★ جديد: إضافة معالج البحث ★★★
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
 # --- كود التوافق مع Render ---
@@ -312,15 +296,12 @@ def index():
     return "Bot is running!"
 
 def run_flask():
-    # استمع على المنفذ الذي يحدده Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    # تشغيل خدمة فلاسك في خيط منفصل
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     
     logger.info("البوت يعمل الآن في وضع Polling...")
     application.run_polling()
-    
