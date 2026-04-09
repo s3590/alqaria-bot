@@ -1,4 +1,4 @@
-# alqariabot.py (النسخة النهائية والمصححة)
+# alqariabot.py (النسخة النهائية الكاملة والمصححة)
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,8 +18,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ★★★ استخدم متغيرات البيئة على Render لهذه القيم ★★★
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "8605134357:AAGC44E2Fw6ljwGFok3zcg_FuVJKnegk0q4")
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "1602450100")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 
 # تعريف حالات المحادثة للوحة تحكم المدير
 (ADMIN_PANEL, SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT, GET_NEW_PRICE) = range(4)
@@ -72,15 +72,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه للبدء."
     
-    # تحديد إذا كانت الرسالة جديدة أو تعديل لرسالة قائمة
     if update.callback_query:
         await update.callback_query.edit_message_text(welcome_message, reply_markup=reply_markup)
     else:
         await update.message.reply_text(welcome_message, reply_markup=reply_markup)
-    return 0 # العودة للحالة الرئيسية في المحادثة
+    return 0
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (هذه الدالة لا تحتاج تعديل)
     query = update.callback_query
     cart = context.user_data.get('cart', {})
     if not cart:
@@ -116,9 +114,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in view_cart: {e}")
 
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (هذه الدالة لا تحتاج تعديل)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -195,10 +191,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await query.edit_message_text(f"❌ تم رفض طلب العميل {escape_markdown(user_info['first_name'])}\\.", parse_mode=ParseMode.MARKDOWN_V2)
             del context.bot_data[order_id]
 
-
 # --- لوحة تحكم المدير ---
 async def admin_panel_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (هذه الدوال لا تحتاج تعديل)
     query = update.callback_query
     if not is_admin(update):
         await query.answer("ليس لديك صلاحية الوصول لهذه المنطقة.", show_alert=True)
@@ -218,7 +212,7 @@ async def admin_manage_products(update: Update, context: ContextTypes.DEFAULT_TY
 async def admin_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     cat_id = int(query.data.split("_")[2])
-    context.user_data['admin_last_cat'] = cat_id # حفظ الفئة للعودة إليها
+    context.user_data['admin_last_cat'] = cat_id
     products = database.get_products_by_category(cat_id)
     keyboard = []
     for p in products:
@@ -247,7 +241,6 @@ async def admin_toggle_availability(update: Update, context: ContextTypes.DEFAUL
     prod_id = context.user_data['product_to_edit']
     database.toggle_product_availability(prod_id)
     await query.answer("✅ تم تحديث حالة المنتج بنجاح!")
-    # إعادة بناء قائمة المنتجات للعودة
     cat_id = context.user_data['admin_last_cat']
     query.data = f"admin_cat_{cat_id}"
     return await admin_select_product(update, context)
@@ -265,7 +258,6 @@ async def admin_update_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
         prod_id = context.user_data['product_to_edit']
         database.update_product_price(prod_id, new_price)
         await update.message.reply_text(f"✅ تم تحديث السعر بنجاح إلى: {new_price}")
-        # العودة إلى لوحة التحكم الرئيسية
         keyboard = [[InlineKeyboardButton("👑 العودة للوحة التحكم", callback_data="admin_panel_main")]]
         await update.message.reply_text("يمكنك العودة للوحة التحكم.", reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
@@ -278,60 +270,61 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 # --- إعداد وتشغيل البوت ---
-# إعداد تطبيق Flask
+
+# إعداد تطبيق Flask (سيستخدمه gunicorn على Render)
 app = Flask(__name__)
 @app.route('/')
 def index():
     return "Bot is running!"
 
 # إعداد تطبيق البوت
-database.setup_database()
-application = Application.builder().token(TOKEN).build()
+if TOKEN and ADMIN_CHAT_ID:
+    application = Application.builder().token(TOKEN).build()
 
-# محادثة لوحة تحكم المدير
-admin_conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$')],
-    states={
-        ADMIN_PANEL: [CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$')],
-        SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')],
-        EDIT_PRODUCT: [
-            CallbackQueryHandler(admin_prompt_for_price, pattern='^admin_edit_price$'),
-            CallbackQueryHandler(admin_toggle_availability, pattern='^admin_toggle_avail$'),
-            CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$')],
+        states={
+            ADMIN_PANEL: [CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$')],
+            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')],
+            EDIT_PRODUCT: [
+                CallbackQueryHandler(admin_prompt_for_price, pattern='^admin_edit_price$'),
+                CallbackQueryHandler(admin_toggle_availability, pattern='^admin_toggle_avail$'),
+                CallbackQueryHandler(admin_select_product, pattern='^admin_cat_')
+            ],
+            GET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_update_price)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$'),
+            CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$'),
+            CallbackQueryHandler(cancel_conversation, pattern='^main_menu$'),
+            CommandHandler('start', cancel_conversation)
         ],
-        GET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_update_price)],
-    },
-    fallbacks=[
-        CallbackQueryHandler(admin_panel_main, pattern='^admin_panel_main$'),
-        CallbackQueryHandler(admin_manage_products, pattern='^admin_manage_products$'),
-        CallbackQueryHandler(cancel_conversation, pattern='^main_menu$'),
-        CommandHandler('start', cancel_conversation)
-    ],
-    map_to_parent={
-        ConversationHandler.END: 0,
-    }
-)
+        map_to_parent={ ConversationHandler.END: 0 }
+    )
 
-# المعالج الرئيسي الذي يجمع كل شيء
-main_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        0: [
-            admin_conv_handler,
-            CallbackQueryHandler(button_handler)
-        ]
-    },
-    fallbacks=[CommandHandler("start", start)]
-)
+    main_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={ 0: [ admin_conv_handler, CallbackQueryHandler(button_handler) ] },
+        fallbacks=[CommandHandler("start", start)]
+    )
+    application.add_handler(main_handler)
+else:
+    logger.critical("خطأ فادح: لم يتم العثور على التوكن أو معرف المدير في متغيرات البيئة. لن يتم تشغيل البوت.")
 
-application.add_handler(main_handler)
-
-# ★★★ الجزء الأخير والمعدل لمنع التعارض ★★★
-if __name__ == "__main__":
-    # هذا الجزء يعمل فقط عند تشغيل الكود مباشرة على جهازك
+# ★★★ الجزء الأخير والمعدل لمنع التعارض (النسخة النهائية) ★★★
+def main():
+    """هذه الدالة للتجربة المحلية فقط."""
+    if not TOKEN or not ADMIN_CHAT_ID:
+        logger.critical("التوكن أو معرف المدير غير موجود. لا يمكن تشغيل البوت محلياً.")
+        return
+    database.setup_database()
     logger.info("البوت يعمل الآن في وضع Polling (للتجربة المحلية)...")
-    # لا حاجة لتشغيل Flask هنا، فقط البوت
     application.run_polling()
 
-# عندما يتم تشغيل الكود على Render بواسطة gunicorn، سيتم تجاهل `if __name__ == "__main__"`
-# وسيقوم gunicorn باستيراد واستخدام كائن `app` من الأعلى مباشرة.
+if __name__ == "__main__":
+    main()
+
+# عند النشر على Render، سيقوم gunicorn باستيراد كائن `app`
+# ويتجاهل تماماً `if __name__ == "__main__"`.
+# لضمان إعداد قاعدة البيانات على Render، نضيف هذا السطر
+database.setup_database()
