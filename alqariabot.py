@@ -16,8 +16,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ★★★ ضع التوكن والمعرفات هنا مباشرة ★★★
-TOKEN = "ضع_التوكن_الخاص_بك_هنا"
-ADMIN_CHAT_ID = "ضع_معرف_المدير_الخاص_بك_هنا"
+TOKEN = "8605134357:AAGC44E2Fw6ljwGFok3zcg_FuVJKnegk0q4"
+ADMIN_CHAT_ID = "1602450100"
 
 # اترك هذه كما هي مؤقتاً
 MERCHANT_CHANNEL_ID = "None"
