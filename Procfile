@@ -1,1 +1,1 @@
-web: gunicorn alqariabot:app
+web: python alqariabot.py
