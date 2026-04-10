@@ -260,20 +260,15 @@ app = Flask(__name__)
 def index():
     return "Bot is running!"
 
-@app.route(f'/{TOKEN}', methods=['POST'])
+@app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
     try:
-        json_data = await request.get_json()
-        if json_data:
-            update = Update.de_json(json_data, application.bot)
-            await application.process_update(update)
-            return 'OK', 200
-        else:
-            logger.warning("Received a request with no JSON data")
-            return 'No JSON data', 400
+        update = Update.de_json(request.json, application.bot)
+        await application.process_update(update)
+        return "OK", 200
     except Exception as e:
         logger.error(f"خطأ في معالجة الـ Webhook: {e}")
-        return 'Error', 500
+        return "Error", 500
 
 async def setup_webhook_on_startup():
     if WEB_URL and TOKEN:
