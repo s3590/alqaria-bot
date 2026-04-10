@@ -309,16 +309,11 @@ async def setup_webhook_on_startup():
         logger.warning("Webhook not set because WEB_URL or TOKEN is missing.")
 
 # --- 8. تشغيل الـ Webhook يدوياً ---
-# نقوم بتشغيل الدالة يدوياً عند بدء التشغيل لأن post_init لا يعمل مع Gunicorn
+# نقوم بتشغيل الدالة يدوياً عند بدء التشغيل لأن Gunicorn لا ينشئ loop
 if __name__ != '__main__':
     try:
-        loop = asyncio.get_event_loop()
-        # نتأكد من أن الـ loop يعمل قبل استدعاء الدالة
-        if not loop.is_running():
-            loop.run_until_complete(setup_webhook_on_startup())
-        else:
-            # إذا كان الـ loop يعمل بالفعل، ننشئ task جديدة
-            loop.create_task(setup_webhook_on_startup())
+        # هذا السطر سيقوم بإنشاء loop جديد وتشغيل الدالة فيه
+        asyncio.run(setup_webhook_on_startup())
     except Exception as e:
         logger.error(f"Failed to run setup_webhook_on_startup manually: {e}")
 
