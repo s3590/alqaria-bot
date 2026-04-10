@@ -11,7 +11,7 @@ from telegram.constants import ParseMode
 from flask import Flask, request
 import threading
 
-# --- 1. الإعدادات الأساسية ---
+# --- 1. الإعدادات الأساسية (الكود كما هو) ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -28,6 +28,7 @@ def db_connect():
     return sqlite3.connect(DB_FILE)
 
 def setup_database():
+    # ... (الكود كما هو)
     try:
         with db_connect() as conn:
             cursor = conn.cursor()
@@ -46,6 +47,7 @@ def setup_database():
 
 # --- 3. دوال مساعدة (الكود كما هو) ---
 def get_product_details(prod_id):
+    # ... (الكود كما هو)
     with db_connect() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT name, price, delivery_fee FROM products WHERE id = ?", (prod_id,))
@@ -55,10 +57,12 @@ def get_product_details(prod_id):
     return None
 
 def is_admin(update: Update) -> bool:
+    # ... (الكود كما هو)
     return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
 
 # --- 4. واجهة البوت (الكود كما هو) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود كما هو)
     context.user_data.setdefault('cart', {})
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_cats")],
@@ -196,10 +200,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # --- 5. البحث ولوحة تحكم المدير (الكود كما هو) ---
 SEARCH = range(1)
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("اكتب اسم المنتج الذي تبحث عنه:")
     return SEARCH
 async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود كما هو)
     search_term = update.message.text.strip().lower()
     with db_connect() as conn:
         cursor = conn.cursor()
@@ -214,18 +220,20 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return ConversationHandler.END
 async def cancel_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود كما هو)
     await start(update, context)
     return ConversationHandler.END
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("👑 لوحة تحكم المدير (قيد التطوير)...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="main_menu")]]))
 
 # --- 6. إعداد تطبيق البوت ---
 setup_database()
-# بناء التطبيق بدون تشغيل أي شيء بعد
 application = Application.builder().token(TOKEN).build()
 
 # إضافة المعالجات
+# ... (الكود كما هو)
 search_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(pattern='^search_start$', callback=search_start)],
     states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_product)]},
@@ -239,39 +247,40 @@ application.add_handler(CallbackQueryHandler(button_handler))
 
 # --- 7. الجزء الجديد والمهم: دمج Flask و PTB ---
 app = Flask(__name__)
+bot_ready = threading.Event() # هذا هو "العلم" أو "القفل" الجديد
 
 @app.route("/")
 def index():
-    """صفحة بسيطة للتأكد من أن الخادم يعمل (مهم لـ UptimeRobot)."""
     return "Flask server is running!"
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 async def webhook():
-    """هذه الدالة تستقبل التحديثات من تيليجرام."""
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return 'OK'
+    if not bot_ready.is_set():
+        logger.warning("Received update before bot is ready. Ignoring.")
+        return "Bot not ready", 503 # 503 Service Unavailable
+
+    try:
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        await application.process_update(update)
+        return 'OK'
+    except Exception as e:
+        logger.error(f"Error processing update: {e}", exc_info=True)
+        return "Error", 500
 
 def run_bot():
-    """دالة لتشغيل البوت وإعداد الويب هوك."""
-    # نستخدم asyncio.run لضمان أن الكود غير المتزامن يعمل بشكل صحيح
     async def main():
-        # تهيئة التطبيق (مهم جداً!)
         await application.initialize()
-        # إعداد الويب هوك
         await application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES)
         logger.info(f"Webhook has been set to {WEB_URL}/{TOKEN}")
+        bot_ready.set() # ارفع العلم: البوت جاهز الآن!
+        logger.info("Bot is ready to process updates.")
     
-    # تشغيل الدالة الرئيسية في حلقة أحداث جديدة
     try:
         asyncio.run(main())
     except Exception as e:
         logger.error(f"An error occurred during bot setup: {e}", exc_info=True)
 
 # --- 8. نقطة البداية ---
-# Gunicorn سيقوم بتشغيل متغير 'app' (خادم Flask)
-# قبل أن يبدأ الخادم بالاستماع للطلبات، نقوم بتشغيل البوت في خيط منفصل.
-# هذا يضمن أن الخادم جاهز قبل أن نحاول الاتصال بالإنترنت.
 if __name__ != '__main__':
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.start()
