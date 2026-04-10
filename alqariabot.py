@@ -1,7 +1,7 @@
 import logging
 import os
 import sqlite3
-from datetime import datetime
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters,
@@ -308,6 +308,18 @@ async def setup_webhook_on_startup():
     else:
         logger.warning("Webhook not set because WEB_URL or TOKEN is missing.")
 
-application.post_init = setup_webhook_on_startup
+# --- 8. تشغيل الـ Webhook يدوياً ---
+# نقوم بتشغيل الدالة يدوياً عند بدء التشغيل لأن post_init لا يعمل مع Gunicorn
+if __name__ != '__main__':
+    try:
+        loop = asyncio.get_event_loop()
+        # نتأكد من أن الـ loop يعمل قبل استدعاء الدالة
+        if not loop.is_running():
+            loop.run_until_complete(setup_webhook_on_startup())
+        else:
+            # إذا كان الـ loop يعمل بالفعل، ننشئ task جديدة
+            loop.create_task(setup_webhook_on_startup())
+    except Exception as e:
+        logger.error(f"Failed to run setup_webhook_on_startup manually: {e}")
 
 logger.info("--- SCRIPT INITIALIZATION COMPLETE ---")
