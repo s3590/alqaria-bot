@@ -12,21 +12,25 @@ from flask import Flask, request
 
 # --- 1. الإعدادات الأساسية ---
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
 
+logger.info("--- SCRIPT STARTED ---")
+
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
-WEB_URL = os.environ.get("RENDER_EXTERNAL_URL")
+WEB_URL = os.environ.get("WEB_URL")
 PORT = int(os.environ.get("PORT", 8443))
 
 if not TOKEN:
-    logger.critical("خطأ فادح: متغير البيئة TELEGRAM_TOKEN غير موجود!")
+    logger.critical("CRITICAL: TELEGRAM_TOKEN env var is missing!")
 if not ADMIN_CHAT_ID:
-    logger.critical("خطأ فادح: متغير البيئة ADMIN_CHAT_ID غير موجود!")
+    logger.critical("CRITICAL: ADMIN_CHAT_ID env var is missing!")
 if not WEB_URL:
-    logger.warning("متغير البيئة RENDER_EXTERNAL_URL غير موجود.")
+    logger.warning("WARNING: WEB_URL env var is missing.")
+
+logger.info(f"Admin Chat ID is: {ADMIN_CHAT_ID}")
 
 # --- 2. إعداد قاعدة البيانات ---
 DB_FILE = "bot_database.db"
@@ -36,20 +40,22 @@ def db_connect():
 
 def setup_database():
     try:
+        logger.info("Setting up database...")
         with db_connect() as conn:
             cursor = conn.cursor()
             cursor.execute("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, emoji TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER, name TEXT NOT NULL, price REAL NOT NULL, delivery_fee REAL NOT NULL, FOREIGN KEY (category_id) REFERENCES categories (id))")
             cursor.execute("SELECT COUNT(*) FROM categories")
             if cursor.fetchone()[0] == 0:
+                logger.info("Database is empty, inserting initial data...")
                 initial_categories = [('دقيق', '🍚'), ('سكر', '🍚'), ('أرز وبقوليات', '🍛'), ('زيوت وسمن', '🧈'), ('حليب', '🥛'), ('معلبات وبهارات', '🥫'), ('منظفات', '🧼')]
                 cursor.executemany("INSERT INTO categories (name, emoji) VALUES (?, ?)", initial_categories)
                 initial_products = [(1, 'كيس دقيق أبيض', 12700, 1000), (1, 'نص كيس دقيق أبيض', 6350, 500), (2, 'كيس سكر (50 كيلو)', 19000, 1000), (2, 'نص كيس سكر (25 كيلو)', 9500, 500), (3, 'رز الربان 10 كيلو', 7400, 300), (4, 'جالون زيت 4 لتر', 3750, 200)]
                 cursor.executemany("INSERT INTO products (category_id, name, price, delivery_fee) VALUES (?, ?, ?, ?)", initial_products)
             conn.commit()
-        logger.info("تم فحص وإعداد قاعدة البيانات بنجاح.")
+        logger.info("Database setup successful.")
     except Exception as e:
-        logger.error(f"حدث خطأ أثناء إعداد قاعدة البيانات: {e}")
+        logger.error(f"DATABASE SETUP FAILED: {e}", exc_info=True)
 
 # --- 3. دوال مساعدة ---
 def get_product_details(prod_id):
@@ -62,24 +68,39 @@ def get_product_details(prod_id):
     return None
 
 def is_admin(update: Update) -> bool:
-    return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
+    user_id = str(update.effective_user.id)
+    admin_id = str(ADMIN_CHAT_ID)
+    logger.debug(f"Checking admin status: UserID={user_id}, AdminID={admin_id}, Match={user_id == admin_id}")
+    return user_id == admin_id
 
 # --- 4. واجهة البوت ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data.setdefault('cart', {})
-    keyboard = [
-        [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_cats")],
-        [InlineKeyboardButton(f"🛍️ عرض سلتي ({len(context.user_data.get('cart', {}))})", callback_data="view_cart")],
-        [InlineKeyboardButton("🔍 بحث عن منتج", callback_data="search_start")]
-    ]
-    if is_admin(update):
-        keyboard.append([InlineKeyboardButton("👑 لوحة تحكم المدير", callback_data="admin_panel")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    if update.message:
-        await update.message.reply_text("🏪 أهلاً بك في بقالة القرية الذكية!", reply_markup=reply_markup)
-    elif update.callback_query:
-        await update.callback_query.edit_message_text("🏪 أهلاً بك في بقالة القرية الذكية!", reply_markup=reply_markup)
+    logger.info(f"/start command received from user {update.effective_user.id}")
+    try:
+        context.user_data.setdefault('cart', {})
+        logger.debug("Building keyboard for start command...")
+        keyboard = [
+            [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_cats")],
+            [InlineKeyboardButton(f"🛍️ عرض سلتي ({len(context.user_data.get('cart', {}))})", callback_data="view_cart")],
+            [InlineKeyboardButton("🔍 بحث عن منتج", callback_data="search_start")]
+        ]
+        if is_admin(update):
+            logger.info("User is admin, adding admin panel button.")
+            keyboard.append([InlineKeyboardButton("👑 لوحة تحكم المدير", callback_data="admin_panel")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if update.message:
+            logger.debug("Replying to message in start handler...")
+            await update.message.reply_text("🏪 أهلاً بك في بقالة القرية الذكية!", reply_markup=reply_markup)
+            logger.info("Start message sent successfully.")
+        elif update.callback_query:
+            logger.debug("Editing message in start handler...")
+            await update.callback_query.edit_message_text("🏪 أهلاً بك في بقالة القرية الذكية!", reply_markup=reply_markup)
+            logger.info("Start message edited successfully.")
 
+    except Exception as e:
+        logger.error(f"ERROR in start handler: {e}", exc_info=True)
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -112,7 +133,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if query: await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
         else: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e: logger.error(f"Error in view_cart: {e}")
+    except Exception as e: logger.error(f"Error in view_cart: {e}", exc_info=True)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -236,7 +257,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("👑 لوحة تحكم المدير (قيد التطوير)...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="main_menu")]]))
 
 # --- 6. إعداد تطبيق البوت ---
+logger.info("Running setup_database()...")
 setup_database()
+logger.info("Building application...")
 application = Application.builder().token(TOKEN).build()
 
 search_conv_handler = ConversationHandler(
@@ -245,13 +268,13 @@ search_conv_handler = ConversationHandler(
     fallbacks=[CallbackQueryHandler(pattern='^main_menu$', callback=cancel_search)]
 )
 
+logger.info("Adding handlers...")
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(pattern='^main_menu$', callback=start))
 application.add_handler(search_conv_handler)
 application.add_handler(CallbackQueryHandler(pattern='^admin_panel$', callback=admin_panel))
-# يجب وضع هذا المعالج في النهاية لأنه عام جداً
 application.add_handler(CallbackQueryHandler(button_handler))
-
+logger.info("Handlers added.")
 
 # --- 7. كود التوافق مع Render ---
 app = Flask(__name__)
@@ -260,24 +283,31 @@ app = Flask(__name__)
 def index():
     return "Bot is running!"
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+@app.route(f'/{TOKEN}', methods=['POST'])
 async def webhook():
+    logger.debug("Webhook received a POST request.")
     try:
         update = Update.de_json(request.json, application.bot)
+        logger.debug(f"Update {update.update_id} received. Processing...")
         await application.process_update(update)
-        return "OK", 200
+        logger.debug(f"Update {update.update_id} processed successfully.")
+        return 'OK', 200
     except Exception as e:
-        logger.error(f"خطأ في معالجة الـ Webhook: {e}")
-        return "Error", 500
+        logger.error(f"ERROR in webhook handler: {e}", exc_info=True)
+        return 'Error', 500
 
 async def setup_webhook_on_startup():
+    logger.info("Attempting to set webhook...")
     if WEB_URL and TOKEN:
         try:
-            await application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES)
-            logger.info(f"Webhook has been set to {WEB_URL}/{TOKEN}")
+            webhook_url = f"{WEB_URL}/{TOKEN}"
+            await application.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
+            logger.info(f"Webhook has been set to {webhook_url}")
         except Exception as e:
-            logger.error(f"فشل إعداد الـ Webhook: {e}")
+            logger.error(f"FAILED to set webhook: {e}", exc_info=True)
     else:
-        logger.warning("لم يتم إعداد الـ Webhook لعدم وجود WEB_URL أو TOKEN.")
+        logger.warning("Webhook not set because WEB_URL or TOKEN is missing.")
 
 application.post_init = setup_webhook_on_startup
+
+logger.info("--- SCRIPT INITIALIZATION COMPLETE ---")
