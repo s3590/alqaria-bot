@@ -9,6 +9,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 from flask import Flask, request
+import threading
 
 # --- 1. الإعدادات الأساسية ---
 logging.basicConfig(
@@ -16,37 +17,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-logger.info("--- SCRIPT STARTED ---")
-
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 WEB_URL = os.environ.get("WEB_URL")
 PORT = int(os.environ.get("PORT", 8443))
 
-if not TOKEN:
-    logger.critical("CRITICAL: TELEGRAM_TOKEN env var is missing!")
-if not ADMIN_CHAT_ID:
-    logger.critical("CRITICAL: ADMIN_CHAT_ID env var is missing!")
-if not WEB_URL:
-    logger.warning("WARNING: WEB_URL env var is missing.")
-
-# --- 2. إعداد قاعدة البيانات ---
+# --- 2. إعداد قاعدة البيانات (الكود كما هو) ---
 DB_FILE = "bot_database.db"
-
 def db_connect():
     return sqlite3.connect(DB_FILE)
 
 def setup_database():
     try:
-        logger.info("Setting up database...")
         with db_connect() as conn:
-            # ... (الكود كما هو)
             cursor = conn.cursor()
             cursor.execute("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, emoji TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER, name TEXT NOT NULL, price REAL NOT NULL, delivery_fee REAL NOT NULL, FOREIGN KEY (category_id) REFERENCES categories (id))")
             cursor.execute("SELECT COUNT(*) FROM categories")
             if cursor.fetchone()[0] == 0:
-                logger.info("Database is empty, inserting initial data...")
                 initial_categories = [('دقيق', '🍚'), ('سكر', '🍚'), ('أرز وبقوليات', '🍛'), ('زيوت وسمن', '🧈'), ('حليب', '🥛'), ('معلبات وبهارات', '🥫'), ('منظفات', '🧼')]
                 cursor.executemany("INSERT INTO categories (name, emoji) VALUES (?, ?)", initial_categories)
                 initial_products = [(1, 'كيس دقيق أبيض', 12700, 1000), (1, 'نص كيس دقيق أبيض', 6350, 500), (2, 'كيس سكر (50 كيلو)', 19000, 1000), (2, 'نص كيس سكر (25 كيلو)', 9500, 500), (3, 'رز الربان 10 كيلو', 7400, 300), (4, 'جالون زيت 4 لتر', 3750, 200)]
@@ -56,9 +44,8 @@ def setup_database():
     except Exception as e:
         logger.error(f"DATABASE SETUP FAILED: {e}", exc_info=True)
 
-# --- 3. دوال مساعدة ---
+# --- 3. دوال مساعدة (الكود كما هو) ---
 def get_product_details(prod_id):
-    # ... (الكود كما هو)
     with db_connect() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT name, price, delivery_fee FROM products WHERE id = ?", (prod_id,))
@@ -68,12 +55,10 @@ def get_product_details(prod_id):
     return None
 
 def is_admin(update: Update) -> bool:
-    # ... (الكود كما هو)
     return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
 
-# --- 4. واجهة البوت ---
+# --- 4. واجهة البوت (الكود كما هو) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود كما هو)
     context.user_data.setdefault('cart', {})
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_cats")],
@@ -88,8 +73,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     elif update.callback_query:
         await update.callback_query.edit_message_text("🏪 أهلاً بك في بقالة القرية الذكية!", reply_markup=reply_markup)
 
+# ... (باقي دوال البوت مثل view_cart, button_handler, etc. تبقى كما هي)
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     query = update.callback_query
     cart = context.user_data.get('cart', {})
     if not cart:
@@ -120,7 +105,6 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود كما هو)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -209,15 +193,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await query.edit_message_text(f"❌ تم رفض طلب العميل {user_info['first_name']}.")
             del context.bot_data[order_id]
 
-# --- 5. البحث ولوحة تحكم المدير ---
+# --- 5. البحث ولوحة تحكم المدير (الكود كما هو) ---
 SEARCH = range(1)
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("اكتب اسم المنتج الذي تبحث عنه:")
     return SEARCH
 async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     search_term = update.message.text.strip().lower()
     with db_connect() as conn:
         cursor = conn.cursor()
@@ -232,57 +214,66 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return ConversationHandler.END
 async def cancel_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     await start(update, context)
     return ConversationHandler.END
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("👑 لوحة تحكم المدير (قيد التطوير)...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="main_menu")]]))
 
 # --- 6. إعداد تطبيق البوت ---
 setup_database()
+# بناء التطبيق بدون تشغيل أي شيء بعد
 application = Application.builder().token(TOKEN).build()
 
-# --- هذا هو التعديل المهم ---
-# يجب تهيئة التطبيق يدوياً قبل استخدامه مع خادم خارجي
-asyncio.run(application.initialize())
-
+# إضافة المعالجات
 search_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(pattern='^search_start$', callback=search_start)],
     states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_product)]},
     fallbacks=[CallbackQueryHandler(pattern='^main_menu$', callback=cancel_search)]
 )
-
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(pattern='^main_menu$', callback=start))
 application.add_handler(search_conv_handler)
 application.add_handler(CallbackQueryHandler(pattern='^admin_panel$', callback=admin_panel))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# --- 7. كود التوافق مع Render ---
+# --- 7. الجزء الجديد والمهم: دمج Flask و PTB ---
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Bot is running!"
+    """صفحة بسيطة للتأكد من أن الخادم يعمل (مهم لـ UptimeRobot)."""
+    return "Flask server is running!"
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 async def webhook():
+    """هذه الدالة تستقبل التحديثات من تيليجرام."""
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    await application.process_update(update)
+    return 'OK'
+
+def run_bot():
+    """دالة لتشغيل البوت وإعداد الويب هوك."""
+    # نستخدم asyncio.run لضمان أن الكود غير المتزامن يعمل بشكل صحيح
+    async def main():
+        # تهيئة التطبيق (مهم جداً!)
+        await application.initialize()
+        # إعداد الويب هوك
+        await application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES)
+        logger.info(f"Webhook has been set to {WEB_URL}/{TOKEN}")
+    
+    # تشغيل الدالة الرئيسية في حلقة أحداث جديدة
     try:
-        update = Update.de_json(request.json, application.bot)
-        await application.process_update(update)
-        return 'OK', 200
+        asyncio.run(main())
     except Exception as e:
-        logger.error(f"ERROR in webhook handler: {e}", exc_info=True)
-        return 'Error', 500
+        logger.error(f"An error occurred during bot setup: {e}", exc_info=True)
 
-async def setup_webhook_on_startup():
-    await application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES)
-    logger.info(f"Webhook has been set to {WEB_URL}/{TOKEN}")
-
-# --- 8. تشغيل الـ Webhook يدوياً ---
+# --- 8. نقطة البداية ---
+# Gunicorn سيقوم بتشغيل متغير 'app' (خادم Flask)
+# قبل أن يبدأ الخادم بالاستماع للطلبات، نقوم بتشغيل البوت في خيط منفصل.
+# هذا يضمن أن الخادم جاهز قبل أن نحاول الاتصال بالإنترنت.
 if __name__ != '__main__':
-    asyncio.run(setup_webhook_on_startup())
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
 
 logger.info("--- SCRIPT INITIALIZATION COMPLETE ---")
