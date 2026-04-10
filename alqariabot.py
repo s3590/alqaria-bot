@@ -18,8 +18,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ★★★ استخدم متغيرات البيئة على Render لهذه القيم ★★★
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
+TOKEN = os.environ.get("8657650618:AAGiZffzHNtrpAYG8I44qzyT8q_gmweCtW0")
+ADMIN_CHAT_ID = os.environ.get("1602450100")
 
 # تعريف حالات المحادثة للوحة تحكم المدير
 (ADMIN_PANEL, SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT, GET_NEW_PRICE) = range(4)
