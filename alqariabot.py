@@ -247,7 +247,7 @@ application.add_handler(CallbackQueryHandler(button_handler))
 
 # --- 7. الجزء الجديد والمهم: دمج Flask و PTB ---
 app = Flask(__name__)
-bot_ready = threading.Event() # هذا هو "العلم" أو "القفل" الجديد
+bot_ready = threading.Event()
 
 @app.route("/")
 def index():
@@ -257,7 +257,7 @@ def index():
 async def webhook():
     if not bot_ready.is_set():
         logger.warning("Received update before bot is ready. Ignoring.")
-        return "Bot not ready", 503 # 503 Service Unavailable
+        return "Bot not ready", 503
 
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
@@ -268,17 +268,26 @@ async def webhook():
         return "Error", 500
 
 def run_bot():
-    async def main():
-        await application.initialize()
-        await application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES)
-        logger.info(f"Webhook has been set to {WEB_URL}/{TOKEN}")
-        bot_ready.set() # ارفع العلم: البوت جاهز الآن!
-        logger.info("Bot is ready to process updates.")
+    # --- هذا هو التعديل الحاسم ---
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
     try:
-        asyncio.run(main())
+        # الآن نقوم بتشغيل كل شيء داخل هذه الحلقة
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES))
+        
+        # إذا وصلنا إلى هنا، كل شيء نجح
+        bot_ready.set()
+        logger.info("Webhook has been set and bot is ready!")
+        
+        # يمكننا إبقاء الحلقة تعمل إذا احتجنا مهام خلفية أخرى
+        # loop.run_forever() 
     except Exception as e:
-        logger.error(f"An error occurred during bot setup: {e}", exc_info=True)
+        logger.error(f"An error occurred during bot setup in thread: {e}", exc_info=True)
+    finally:
+        loop.close()
+
 
 # --- 8. نقطة البداية ---
 if __name__ != '__main__':
