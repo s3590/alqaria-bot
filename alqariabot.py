@@ -305,7 +305,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data.startswith("order_delivered_"):
         order_id = data.split("_")[2]
         update_order_status(order_id, "تم التسليم", actor="المدير")
-        withdb_connect() as conn:
+        with db_connect() as conn:
             user_id = conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,)).fetchone()['user_id']
         await context.bot.send_message(chat_id=user_id, text=f"🎉 نأمل أن تكون راضيًا عن الخدمة! تم تسليم طلبك رقم `{order_id}` بنجاح.", parse_mode=ParseMode.MARKDOWN)
         await query.edit_message_text(f"🎉 تم تحديث حالة الطلب `{order_id}` إلى 'تم التسليم'.", parse_mode=ParseMode.MARKDOWN)
