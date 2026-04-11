@@ -1,4 +1,3 @@
-# --- بقالة القرية الذكية - الإصدار 14.1 (النسخة المستقرة المصححة) ---
 import logging
 import os
 import sqlite3
@@ -261,14 +260,14 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
-    await admin_panel(update, context) # Changed to show admin panel again
+    await admin_panel(update, context)
     return ConversationHandler.END
 
 async def admin_add_sub_cat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn:
         cats = conn.execute("SELECT * FROM main_categories").fetchall()
     keyboard = [[InlineKeyboardButton(c['name'], callback_data=f"addsub_main_{c['id']}")] for c in cats]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
+    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="admin_panel")])
     await update.callback_query.edit_message_text("اختر القسم الرئيسي الذي ينتمي إليه النوع الجديد:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_SUB_CAT_CHOOSE_MAIN
 async def admin_add_sub_cat_choose_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -289,14 +288,14 @@ async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(f"✅ تم إضافة النوع '{name}' بنجاح.")
     del context.user_data['new_sub_cat_main_id']
     del context.user_data['new_sub_cat_name']
-    await admin_panel(update, context) # Changed to show admin panel again
+    await admin_panel(update, context)
     return ConversationHandler.END
 
 async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn:
         sub_cats = conn.execute("SELECT * FROM sub_categories").fetchall()
     keyboard = [[InlineKeyboardButton(sc['name'], callback_data=f"addprod_sub_{sc['id']}")] for sc in sub_cats]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
+    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="admin_panel")])
     await update.callback_query.edit_message_text("اختر النوع الذي ينتمي إليه المنتج النهائي:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_PROD_CHOOSE_SUB
 async def admin_add_prod_choose_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +325,7 @@ async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE)
     del context.user_data['new_prod_sub_id']
     del context.user_data['new_prod_name']
     del context.user_data['new_prod_price']
-    await admin_panel(update, context) # Changed to show admin panel again
+    await admin_panel(update, context)
     return ConversationHandler.END
 
 # --- 5.2 محادثات تعديل السعر ---
@@ -353,95 +352,52 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
         return EDIT_PRICE_SET
     
-    new_price = int(new_price_text)
-    prod_id = context.user_data['product_to_edit']
-    
-    with db_connect() as conn:
-        conn.execute("UPDATE products SET price = ? WHERE id = ?", (new_price, prod_id))
-        conn.commit()
-    
-    item = get_product_details(prod_id)
-    full_name = f"{item['sub_cat_name']} {item['name']}"
-    await update.message.reply_text(f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح.", parse_mode=ParseMode.MARKDOWN_V2)
-    
-    del context.user_data['product_to_edit']
-    
-    # استدعاء admin_panel لإظهار لوحة التحكم بعد التعديل
-    # نحتاج إلى استدعائها مع query الذي بدأ المحادثة
-    query = update.callback_query or (await context.bot.send_message(chat_id=update.effective_chat.id, text="..."))
-    
-    # للتعامل مع الحالات التي لا يكون فيها query متاحًا بسهولة بعد رسالة نصية
-    # الأفضل هو إعادة بناء الـ update object بشكل مبسط للوحة التحكم
-    class MockQuery:
-        def __init__(self, update_obj):
-            self.message = update_obj.message
-            self.from_user = update_obj.effective_user
-        async def edit_message_text(self, *args, **kwargs):
-            return await self.message.reply_text(*args, **kwargs)
+    new_pras conn:
+        orders = conn.execute("SELECT * FROM orders WHERE status = 'تم التسليم' AND order_date >= ?", (start_date_str,)).fetchall()
 
-    mock_update = type('MockUpdate', (), {'callback_query': MockQuery(update), 'effective_user': update.effective_user})
-    await admin_panel(mock_update, context)
+    if not orders:
+        await query.edit_message_text(f"لا توجد مبيعات مكتملة في الفترة المحددة.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+        return
+
+    total_sales = sum(o['total_price'] for o in orders)
+    num_orders = len(orders)
+    product_sales = {}
+    for order in orders:
+        cart = json.loads(order['products'])
+        for prod_id, qty in cart.items():
+            if prod_id in product_sales:
+                product_sales[prod_id] += qty
+            else:
+                product_sales[prod_id] = qty
     
-    return ConversationHandler.END
-
-    # --- 5.3 محادثات الحذف ---
-DELETE_CHOOSE_ITEM = range(1)
-async def admin_delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("حذف قسم رئيسي", callback_data="delete_type_main")],
-        [InlineKeyboardButton("حذف نوع منتج", callback_data="delete_type_sub")],
-        [InlineKeyboardButton("حذف منتج نهائي", callback_data="delete_type_prod")],
-        [InlineKeyboardButton("« العودة للوحة التحكم", callback_data="admin_panel")]
-    ]
-    await update.callback_query.edit_message_text("ماذا تريد أن تحذف؟ (تحذير: سيتم حذف كل ما يتبعه!)", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def admin_delete_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    item_type = query.data.split("_")[2] # main, sub, prod
-    context.user_data['item_type_to_delete'] = item_type
+    sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
     
-    with db_connect() as conn:
-        if item_type == 'main':
-            items = conn.execute("SELECT id, name FROM main_categories ORDER BY name").fetchall()
-            title = "اختر القسم الرئيسي للحذف:"
-        elif item_type == 'sub':
-            items = conn.execute("SELECT s.id, s.name, m.name as parent_name FROM sub_categories s JOIN main_categories m ON s.main_category_id = m.id ORDER BY parent_name, s.name").fetchall()
-            title = "اختر النوع للحذف:"
-        else: # prod
-            items = conn.execute("SELECT p.id, p.name, s.name as parent_name FROM products p JOIN sub_categories s ON p.sub_category_id = s.id ORDER BY parent_name, p.name").fetchall()
-            title = "اختر المنتج النهائي للحذف:"
+    report_text = f"📊 *{title}*\n"
+    report_text += f"*{'='*20}*\n"
+    report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
+    report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
+    report_text += "📈 *المنتجات الأكثر مبيعًا:*\n"
+    
+    for i, (prod_id, qty) in enumerate(sorted_products[:5]):
+        details = get_product_details(prod_id)
+        if details:
+            full_name = f"{details['sub_cat_name']} {details['name']}"
+            report_text += f"{i+1}. {full_name} - *(الكمية: {qty})*\n"
+            
+    await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
 
-    if not items:
-        await query.edit_message_text("لا توجد عناصر للحذف.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_delete_menu")]]))
+# --- 6. تتبع الطلب للعميل ---
+TRACK_ORDER_ID = range(1)
+async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
+    return TRACK_ORDER_ID
+
+async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    order_id = update.message.text
+    if not order_id.isdigit():
+        await update.message.reply_text("رقم الطلب غير صالح. الرجاء إرسال أرقام فقط.")
+        await start(update, context)
         return ConversationHandler.END
-
-    keyboard = []
-    for item in items:
-        label = f"{item['parent_name']} > {item['name']}" if 'parent_name' in item.keys() else item['name']
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"delitem_{item['id']}")])
-    
-    keyboard.append([InlineKeyboardButton("« إلغاء", callback_data="admin_panel")])
-    await query.edit_message_text(title, reply_markup=InlineKeyboardMarkup(keyboard))
-    return DELETE_CHOOSE_ITEM
-
-async def admin_delete_item_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    item_id = query.data.split("_")[1]
-    item_type = context.user_data['item_type_to_delete']
-    
-    table_map = {'main': 'main_categories', 'sub': 'sub_categories', 'prod': 'products'}
-    table_name = table_map[item_type]
-
-    with db_connect() as conn:
-        item = conn.execute(f"SELECT name FROM {table_name} WHERE id = ?", (item_id,)).fetchone()
-        conn.execute(f"DELETE FROM {table_name} WHERE id = ?", (item_id,))
-        conn.commit()
-    
-    await query.edit_message_text(f"✅ تم حذف '{item['name']}' وكل ما يتعلق به بنجاح.")
-    del context.user_data['item_type_to_delete']
-    await admin_panel(update, context)
-    return ConversationHandler.END
-
 
     with db_connect() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
@@ -460,7 +416,7 @@ async def admin_delete_item_confirm(update: Update, context: ContextTypes.DEFAUL
             date_obj = event['date'] # Fallback for old format
         status_text += f"🔹 *{escape_markdown(event['status'])}* - {escape_markdown(date_obj)}\n"
     
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]]))
+    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
     await start(update, context)
     return ConversationHandler.END
 
@@ -709,12 +665,11 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
-        # Check the callback data to decide where to go back to
-        if query.data == "admin_panel":
-            await admin_panel(update, context)
-        else: # Default fallback
-            await start(update, context)
-    else: # If called from a message handler
+        if 'admin_panel' in query.data:
+             await admin_panel(update, context)
+        else:
+             await start(update, context)
+    else:
         await start(update, context)
     return ConversationHandler.END
 
@@ -797,4 +752,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
