@@ -383,7 +383,65 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
     await admin_panel(mock_update, context)
     
     return ConversationHandler.END
+
+    # --- 5.3 محادثات الحذف ---
+DELETE_CHOOSE_ITEM = range(1)
+async def admin_delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("حذف قسم رئيسي", callback_data="delete_type_main")],
+        [InlineKeyboardButton("حذف نوع منتج", callback_data="delete_type_sub")],
+        [InlineKeyboardButton("حذف منتج نهائي", callback_data="delete_type_prod")],
+        [InlineKeyboardButton("« العودة للوحة التحكم", callback_data="admin_panel")]
+    ]
+    await update.callback_query.edit_message_text("ماذا تريد أن تحذف؟ (تحذير: سيتم حذف كل ما يتبعه!)", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def admin_delete_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    item_type = query.data.split("_")[2] # main, sub, prod
+    context.user_data['item_type_to_delete'] = item_type
     
+    with db_connect() as conn:
+        if item_type == 'main':
+            items = conn.execute("SELECT id, name FROM main_categories ORDER BY name").fetchall()
+            title = "اختر القسم الرئيسي للحذف:"
+        elif item_type == 'sub':
+            items = conn.execute("SELECT s.id, s.name, m.name as parent_name FROM sub_categories s JOIN main_categories m ON s.main_category_id = m.id ORDER BY parent_name, s.name").fetchall()
+            title = "اختر النوع للحذف:"
+        else: # prod
+            items = conn.execute("SELECT p.id, p.name, s.name as parent_name FROM products p JOIN sub_categories s ON p.sub_category_id = s.id ORDER BY parent_name, p.name").fetchall()
+            title = "اختر المنتج النهائي للحذف:"
+
+    if not items:
+        await query.edit_message_text("لا توجد عناصر للحذف.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_delete_menu")]]))
+        return ConversationHandler.END
+
+    keyboard = []
+    for item in items:
+        label = f"{item['parent_name']} > {item['name']}" if 'parent_name' in item.keys() else item['name']
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"delitem_{item['id']}")])
+    
+    keyboard.append([InlineKeyboardButton("« إلغاء", callback_data="admin_panel")])
+    await query.edit_message_text(title, reply_markup=InlineKeyboardMarkup(keyboard))
+    return DELETE_CHOOSE_ITEM
+
+async def admin_delete_item_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    item_id = query.data.split("_")[1]
+    item_type = context.user_data['item_type_to_delete']
+    
+    table_map = {'main': 'main_categories', 'sub': 'sub_categories', 'prod': 'products'}
+    table_name = table_map[item_type]
+
+    with db_connect() as conn:
+        item = conn.execute(f"SELECT name FROM {table_name} WHERE id = ?", (item_id,)).fetchone()
+        conn.execute(f"DELETE FROM {table_name} WHERE id = ?", (item_id,))
+        conn.commit()
+    
+    await query.edit_message_text(f"✅ تم حذف '{item['name']}' وكل ما يتعلق به بنجاح.")
+    del context.user_data['item_type_to_delete']
+    await admin_panel(update, context)
+    return ConversationHandler.END
+
 
     with db_connect() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
