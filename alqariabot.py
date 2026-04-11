@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 15.0 (النسخة النهائية والمختبرة) ---
+# --- بقالة القرية الذكية - الإصدار 15.1 (النسخة النهائية والمختبرة والمصححة) ---
 import logging
 import os
 import sqlite3
@@ -352,7 +352,45 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
     if not new_price_text.isdigit():
         await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
         return EDIT_PRICE_SET
-    new_price *{title}*\n"
+    : ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    period = query.data.split("_")[2]
+    now = datetime.now(TIMEZONE)
+    
+    if period == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        title = "تقرير اليوم"
+    elif period == "yesterday":
+        yesterday = now - timedelta(days=1)
+        start_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        title = "تقرير الأمس"
+    else: # week
+        start_date = now - timedelta(days=7)
+        title = "تقرير آخر 7 أيام"
+    
+    start_date_str = start_date.strftime('%Y-%m-%d %H:%M')
+    
+    with db_connect() as conn:
+        orders = conn.execute("SELECT * FROM orders WHERE status = 'تم التسليم' AND order_date >= ?", (start_date_str,)).fetchall()
+
+    if not orders:
+        await query.edit_message_text(f"لا توجد مبيعات مكتملة في الفترة المحددة.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+        return
+
+    total_sales = sum(o['total_price'] for o in orders)
+    num_orders = len(orders)
+    product_sales = {}
+    for order in orders:
+        cart = json.loads(order['products'])
+        for prod_id, qty in cart.items():
+            if prod_id in product_sales:
+                product_sales[prod_id] += qty
+            else:
+                product_sales[prod_id] = qty
+    
+    sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
+    
+    report_text = f"📊 *{title}*\n"
     report_text += f"*{'='*20}*\n"
     report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
     report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
@@ -732,4 +770,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
