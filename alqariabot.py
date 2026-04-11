@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 9.1 (إصلاح النشر) ---
+# --- بقالة القرية الذكية - الإصدار 9.2 (الإصلاح النهائي) ---
 import logging
 import os
 import sqlite3
@@ -13,7 +13,7 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
-# --- 1. الإعدادات الأساسية (لا تغيير) ---
+# --- 1. الإعدادات الأساسية ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -22,7 +22,7 @@ WEB_URL = os.environ.get("WEB_URL")
 PORT = int(os.environ.get("PORT", 8443))
 TIMEZONE = pytz.timezone("Asia/Aden")
 
-# --- 2. إعداد قاعدة البيانات (لا تغيير) ---
+# --- 2. إعداد قاعدة البيانات ---
 DB_FILE = "bot_database.v4.0.db"
 
 def db_connect():
@@ -34,16 +34,14 @@ def setup_database():
     try:
         with db_connect() as conn:
             cursor = conn.cursor()
-            # الجداول الرئيسية
             cursor.execute("CREATE TABLE IF NOT EXISTS main_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, emoji TEXT)")
             cursor.execute("CREATE TABLE IF NOT EXISTS sub_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, main_category_id INTEGER, name TEXT NOT NULL, image_url TEXT, FOREIGN KEY (main_category_id) REFERENCES main_categories (id))")
             cursor.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, sub_category_id INTEGER, name TEXT NOT NULL, price REAL NOT NULL, delivery_fee REAL NOT NULL, FOREIGN KEY (sub_category_id) REFERENCES sub_categories (id))")
-            # جداول المستخدمين والطلبات
             cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, cart TEXT DEFAULT '{}')")
             cursor.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, products TEXT NOT NULL, total_price REAL NOT NULL, status TEXT DEFAULT 'قيد المراجعة', order_date TEXT NOT NULL)")
 
             cursor.execute("SELECT COUNT(*) FROM main_categories")
-            if cursor.fetchone() == 0:
+            if cursor.fetchone()[0] == 0:
                 logger.info("Populating database with initial data (v4.0)...")
                 main_cats = [('الدقيق', '🍚'), ('السكر', '🍚'), ('الأرز', '🍛'), ('البقوليات', '🫘'), ('الزيوت والسمن', '🧈'), ('الحليب', '🥛')]
                 cursor.executemany("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", main_cats)
@@ -71,7 +69,7 @@ def setup_database():
     except Exception as e:
         logger.error(f"DATABASE SETUP FAILED: {e}", exc_info=True)
 
-# --- 3. دوال مساعدة (لا تغيير) ---
+# --- 3. دوال مساعدة ---
 def get_product_details(prod_id):
     with db_connect() as conn:
         return conn.execute("SELECT p.*, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id WHERE p.id = ?", (prod_id,)).fetchone()
@@ -121,7 +119,7 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت الرئيسية (لا تغيير) ---
+# --- 4. واجهة البوت الرئيسية ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب طلبك مباشرة** (مثال: 2 كيس سكر)."
     keyboard = [
@@ -176,7 +174,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
 
-# --- 5. المعالج الموحد للأزرار (لا تغيير) ---
+# --- 5. المعالج الموحد للأزرار ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -286,7 +284,6 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
             conn.execute("UPDATE orders SET status = 'تم التأكيد' WHERE id = ?", (order_id,))
             conn.commit()
         await context.bot.send_message(chat_id=order['user_id'], text=f"✅ تم تأكيد طلبك رقم `{order_id}` وجاري تجهيزه الآن!")
-        # ★★★ السطر المُصلَح ★★★
         msg = f"✅ تمت الموافقة على طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}."
         await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     elif data.startswith("order_reject_"):
@@ -299,7 +296,6 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
             conn.execute("UPDATE orders SET status = 'ملغي' WHERE id = ?", (order_id,))
             conn.commit()
         await context.bot.send_message(chat_id=order['user_id'], text=f"❌ نعتذر، تم إلغاء طلبك رقم `{order_id}`.")
-        # ★★★ السطر المُصلَح ★★★
         msg = f"❌ تم رفض طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}."
         await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     elif data == "my_orders":
@@ -317,7 +313,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data == "admin_add_menu": await admin_add_menu(update, context)
     elif data == "admin_delete_menu": await admin_delete_menu(update, context)
 
-# --- 6. دالة مساعدة لعرض المنتجات (لا تغيير) ---
+# --- 6. دالة مساعدة لعرض المنتجات ---
 async def show_products_for_subcategory(query, context, sub_cat_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE sub_category_id = ? ORDER BY price", (sub_cat_id,)).fetchall()
@@ -345,7 +341,7 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
         logger.error(f"Error in show_products_for_subcategory: {e}")
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
 
-# --- 7. لوحة تحكم المدير الكاملة (لا تغيير) ---
+# --- 7. لوحة تحكم المدير الكاملة ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
@@ -388,7 +384,8 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
         with db_connect() as conn:
             conn.execute("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", (name, emoji))
             conn.commit()
-        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي'{name}' بنجاح.")
+        # ★★★ السطر المُصلَح ★★★
+        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي '{name}' بنجاح.")
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
@@ -422,15 +419,6 @@ async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_
     del context.user_data['new_sub_cat_name']
     await start(update, context)
     return ConversationHandler.END
-
-async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db_connect() as conn:
-        sub_cats = conn.execute("SELECT * FROM sub_categories").fetchall()
-    keyboard = [[InlineKeyboardButton(sc['name'], callback_data=f"subcatid_{sc['id']}")] for sc in sub_cats]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
-    await update.callback_query.edit_message_text("اختر النوع الذي ينتمي إليه المنتج النهائي:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ADD_PROD_CHOOSE_SUB
-async def admin_add_prod_choose_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['new_prod_sub_id'] = update.callback_query.data.split("_")[1]
     await update.callback_query.edit_message_text("أرسل اسم المنتج النهائي (مثال: كيس 50 كيلو).")
     return ADD_PROD_NAME
@@ -475,7 +463,6 @@ async def admin_edit_price_choose(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['product_to_edit'] = prod_id
     item = get_product_details(prod_id)
     full_name = f"{item['sub_cat_name']} {item['name']}"
-    # ★★★ السطر المُصلَح ★★★
     msg = f"السعر الحالي لـ *{escape_markdown(full_name)}* هو {int(item['price'])} ريال. \n\nأرسل السعر الجديد الآن (أرقام فقط)."
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     return EDIT_PRICE_SET
@@ -491,7 +478,6 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
         conn.commit()
     item = get_product_details(prod_id)
     full_name = f"{item['sub_cat_name']} {item['name']}"
-    # ★★★ السطر المُصلَح ★★★
     msg = f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح."
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     del context.user_data['product_to_edit']
@@ -568,7 +554,7 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     return ConversationHandler.END
 
-# --- 8. البحث الذكي والواعي (تحديث كبير) ---
+# --- 8. البحث الذكي والواعي ---
 GREETING_KEYWORDS = ["كيف", "حالك", "السلام", "عليكم", "مرحبا", "بكم", "صباح", "مساء", "بقالة", "اهلًا", "هلا"]
 
 def find_product_matches(text_line: str):
@@ -651,7 +637,6 @@ def main() -> None:
     setup_database()
     application = Application.builder().token(TOKEN).build()
     
-    # --- تعريف كل المحادثات ---
     add_main_cat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_main_cat_start, pattern='^add_main_cat_start$')],
         states={ADD_MAIN_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_name)], ADD_MAIN_CAT_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_emoji)],},
@@ -678,7 +663,6 @@ def main() -> None:
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
 
-    # --- إضافة كل المعالجات ---
     application.add_handler(CommandHandler("start", start))
     application.add_handler(add_main_cat_conv)
     application.add_handler(add_sub_cat_conv)
@@ -688,7 +672,6 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(unified_button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
-    # --- التشغيل ---
     logger.info("Starting bot with webhook...")
     application.run_webhook(
         listen="0.0.0.0",
