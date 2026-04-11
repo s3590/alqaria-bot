@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 9.0 (البوت الخبير) ---
+# --- بقالة القرية الذكية - الإصدار 9.1 (إصلاح النشر) ---
 import logging
 import os
 import sqlite3
@@ -43,7 +43,7 @@ def setup_database():
             cursor.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, products TEXT NOT NULL, total_price REAL NOT NULL, status TEXT DEFAULT 'قيد المراجعة', order_date TEXT NOT NULL)")
 
             cursor.execute("SELECT COUNT(*) FROM main_categories")
-            if cursor.fetchone()[0] == 0:
+            if cursor.fetchone() == 0:
                 logger.info("Populating database with initial data (v4.0)...")
                 main_cats = [('الدقيق', '🍚'), ('السكر', '🍚'), ('الأرز', '🍛'), ('البقوليات', '🫘'), ('الزيوت والسمن', '🧈'), ('الحليب', '🥛')]
                 cursor.executemany("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", main_cats)
@@ -121,7 +121,7 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت الرئيسية (★★★ تم تكبير الأزرار ★★★) ---
+# --- 4. واجهة البوت الرئيسية (لا تغيير) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب طلبك مباشرة** (مثال: 2 كيس سكر)."
     keyboard = [
@@ -176,7 +176,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
 
-# --- 5. المعالج الموحد للأزرار (★★★ تم تكبير الأزرار ★★★) ---
+# --- 5. المعالج الموحد للأزرار (لا تغيير) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -286,7 +286,9 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
             conn.execute("UPDATE orders SET status = 'تم التأكيد' WHERE id = ?", (order_id,))
             conn.commit()
         await context.bot.send_message(chat_id=order['user_id'], text=f"✅ تم تأكيد طلبك رقم `{order_id}` وجاري تجهيزه الآن!")
-        await query.edit_message_text(f"✅ تمت الموافقة على طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}\.", parse_mode=ParseMode.MARKDOWN_V2)
+        # ★★★ السطر المُصلَح ★★★
+        msg = f"✅ تمت الموافقة على طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}."
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     elif data.startswith("order_reject_"):
         order_id = data.split("_")[2]
         with db_connect() as conn:
@@ -297,7 +299,9 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
             conn.execute("UPDATE orders SET status = 'ملغي' WHERE id = ?", (order_id,))
             conn.commit()
         await context.bot.send_message(chat_id=order['user_id'], text=f"❌ نعتذر، تم إلغاء طلبك رقم `{order_id}`.")
-        await query.edit_message_text(f"❌ تم رفض طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}\.", parse_mode=ParseMode.MARKDOWN_V2)
+        # ★★★ السطر المُصلَح ★★★
+        msg = f"❌ تم رفض طلب رقم `{order_id}` للعميل {escape_markdown(order['user_name'])}."
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     elif data == "my_orders":
         with db_connect() as conn:
             orders = conn.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
@@ -313,7 +317,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data == "admin_add_menu": await admin_add_menu(update, context)
     elif data == "admin_delete_menu": await admin_delete_menu(update, context)
 
-# --- 6. دالة مساعدة لعرض المنتجات (★★★ تم تكبير الأزرار ★★★) ---
+# --- 6. دالة مساعدة لعرض المنتجات (لا تغيير) ---
 async def show_products_for_subcategory(query, context, sub_cat_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE sub_category_id = ? ORDER BY price", (sub_cat_id,)).fetchall()
@@ -333,17 +337,15 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
     
     try:
         if sub_cat['image_url']:
-            # نحذف الرسالة القديمة ونرسل الصورة مع الأزرار الجديدة
             await query.delete_message()
             await context.bot.send_photo(chat_id=query.effective_chat.id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
         else:
-            # في حال عدم وجود صورة، نعدل الرسالة النصية
             await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
         logger.error(f"Error in show_products_for_subcategory: {e}")
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
 
-# --- 7. لوحة تحكم المدير الكاملة (★★★ تم تكبير الأزرار ★★★) ---
+# --- 7. لوحة تحكم المدير الكاملة (لا تغيير) ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
@@ -386,7 +388,8 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
         with db_connect() as conn:
             conn.execute("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", (name, emoji))
             conn.commit()
-        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي '{name}' بنجاح.")
+        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي
+ '{name}' بنجاح.")
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
@@ -436,6 +439,8 @@ async def admin_add_prod_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data['new_prod_name'] = update.message.text
     await update.message.reply_text("أرسل سعر المنتج (أرقام فقط).")
     return ADD_PROD_PRICE
+async def admin_add_prod_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['new_prod_price'] = update.message.text
     await update.message.reply_text("أرسل رسوم توصيل المنتج (أرقام فقط).")
     return ADD_PROD_FEE
 async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -471,7 +476,9 @@ async def admin_edit_price_choose(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['product_to_edit'] = prod_id
     item = get_product_details(prod_id)
     full_name = f"{item['sub_cat_name']} {item['name']}"
-    await query.edit_message_text(f"السعر الحالي لـ *{escape_markdown(full_name)}* هو {int(item['price'])} ريال\. \n\nأرسل السعر الجديد الآن \(أرقام فقط\)\.", parse_mode=ParseMode.MARKDOWN_V2)
+    # ★★★ السطر المُصلَح ★★★
+    msg = f"السعر الحالي لـ *{escape_markdown(full_name)}* هو {int(item['price'])} ريال. \n\nأرسل السعر الجديد الآن (أرقام فقط)."
+    await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     return EDIT_PRICE_SET
 async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_price_text = update.message.text
@@ -485,7 +492,9 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
         conn.commit()
     item = get_product_details(prod_id)
     full_name = f"{item['sub_cat_name']} {item['name']}"
-    await update.message.reply_text(f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح\.", parse_mode=ParseMode.MARKDOWN_V2)
+    # ★★★ السطر المُصلَح ★★★
+    msg = f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح."
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
     del context.user_data['product_to_edit']
     await admin_panel(update, context)
     return ConversationHandler.END
@@ -560,23 +569,13 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     return ConversationHandler.END
 
-# --- 8. البحث الذكي والواعي (★★★ تحديث كبير جداً ★★★) ---
+# --- 8. البحث الذكي والواعي (تحديث كبير) ---
 GREETING_KEYWORDS = ["كيف", "حالك", "السلام", "عليكم", "مرحبا", "بكم", "صباح", "مساء", "بقالة", "اهلًا", "هلا"]
 
 def find_product_matches(text_line: str):
-    """
-    تبحث هذه الدالة عن أفضل تطابق للمنتجات بناءً على النص المدخل.
-    تعيد قائمة بالمنتجات المرشحة.
-    """
     words = text_line.split()
-    
     with db_connect() as conn:
-        all_products = conn.execute("""
-            SELECT p.id, p.name as prod_name, sc.name as sub_cat_name
-            FROM products p
-            JOIN sub_categories sc ON p.sub_category_id = sc.id
-        """).fetchall()
-
+        all_products = conn.execute("SELECT p.id, p.name as prod_name, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id").fetchall()
     candidates = []
     for product in all_products:
         full_name = f"{product['sub_cat_name']} {product['prod_name']}"
@@ -586,98 +585,67 @@ def find_product_matches(text_line: str):
                 score += 1
         if score > 0:
             candidates.append({'product': product, 'score': score})
-    
-    # فرز المرشحين حسب النقاط (الأعلى أولاً)
     return sorted(candidates, key=lambda x: x['score'], reverse=True)
 
 async def clarify_product_options(update: Update, context: ContextTypes.DEFAULT_TYPE, term: str, matches: list):
-    """
-    تعرض خيارات للمستخدم عندما يكون البحث غامضًا.
-    """
     keyboard = []
     for match in matches:
         prod = match['product']
         full_name = f"{prod['sub_cat_name']} {prod['prod_name']}"
         keyboard.append([InlineKeyboardButton(f"➕ {full_name}", callback_data=f"add_clarify_{prod['id']}")])
-    
-    await update.message.reply_text(
-        f"وجدت عدة منتجات تطابق '{term}'، أيها تقصد؟",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text(f"وجدت عدة منتجات تطابق '{term}'، أيها تقصد؟", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     text = update.message.text.strip()
     
-    # التحقق من التحيات أولاً
     if any(keyword in text.lower() for keyword in GREETING_KEYWORDS):
         await update.message.reply_text("أهلاً بك! أنا بوت بقالة القرية الذكية. يمكنك تصفح المنتجات من الأزرار أو كتابة طلبك مباشرة.")
         return
 
-    added_items = []
-    not_found_items = []
-    ambiguous_items = []
+    added_items, not_found_items, ambiguous_items = [], [], []
 
     for line in text.splitlines():
         line = line.strip()
-        if not line:
-            continue
-
-        # استخراج الكمية أولاً
+        if not line: continue
         quantity_match = re.match(r'^\d+', line)
         quantity = 1
         search_text = line
         if quantity_match:
             quantity = int(quantity_match.group(0))
             search_text = line[quantity_match.end():].strip()
-
         matches = find_product_matches(search_text)
-
         if not matches:
             not_found_items.append(line)
             continue
-
-        # إذا كان هناك تطابق ممتاز وواضح (أعلى نتيجة أفضل من الثانية)
         if len(matches) == 1 or matches[0]['score'] > matches[1]['score']:
             best_match = matches[0]['product']
             cart = get_user_cart(user_id)
             cart[str(best_match['id'])] = cart.get(str(best_match['id']), 0) + quantity
             save_user_cart(user_id, cart)
-            
             full_name = f"{best_match['sub_cat_name']} {best_match['prod_name']}"
             added_items.append(f"(x{quantity}) {full_name}")
-        
-        # إذا كان هناك غموض (أكثر من نتيجة بنفس القوة)
         else:
-            # جمع كل النتائج المتساوية في القوة
             top_score = matches[0]['score']
             ambiguous_matches = [m for m in matches if m['score'] == top_score]
             ambiguous_items.append({'term': search_text, 'matches': ambiguous_matches})
 
-    # بناء رسالة الرد
     response_message = ""
     if added_items:
         response_message += "✅ *تمت إضافة المنتجات التالية للسلة:*\n" + "\n".join(f"- {item}" for item in added_items)
-    
     if not_found_items:
         if response_message: response_message += "\n\n"
         response_message += "⚠️ *عذراً، لم أتمكن من العثور على:*\n" + "\n".join(f"- {item}" for item in not_found_items)
-
     if response_message:
         await update.message.reply_text(response_message, parse_mode=ParseMode.MARKDOWN_V2)
-
-    # التعامل مع الطلبات الغامضة (بعد إرسال الرد الأول)
     if ambiguous_items:
         for item in ambiguous_items:
             await clarify_product_options(update, context, item['term'], item['matches'])
-    
-    # إذا لم يتم العثور على أي شيء على الإطلاق، أرسل الرسالة للمدير
     if not added_items and not ambiguous_items and not_found_items:
         user = update.effective_user
         forward_message = f"رسالة لم يفهمها البوت من العميل: {user.full_name} (@{user.username or 'لا يوجد'})\n\n---\n{text}\n---"
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forward_message)
         await update.message.reply_text("شكراً لك، تم إرسال رسالتك إلى الإدارة للمراجعة والرد عليك في أقرب وقت.")
-
 
 # --- 9. الإعداد والتشغيل ---
 def main() -> None:
@@ -687,48 +655,27 @@ def main() -> None:
     # --- تعريف كل المحادثات ---
     add_main_cat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_main_cat_start, pattern='^add_main_cat_start$')],
-        states={
-            ADD_MAIN_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_name)],
-            ADD_MAIN_CAT_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_emoji)],
-        },
+        states={ADD_MAIN_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_name)], ADD_MAIN_CAT_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_emoji)],},
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
     )
     add_sub_cat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_sub_cat_start, pattern='^add_sub_cat_start$')],
-        states={
-            ADD_SUB_CAT_CHOOSE_MAIN: [CallbackQueryHandler(admin_add_sub_cat_choose_main, pattern='^maincatid_')],
-            ADD_SUB_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_name)],
-            ADD_SUB_CAT_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_image)],
-        },
+        states={ADD_SUB_CAT_CHOOSE_MAIN: [CallbackQueryHandler(admin_add_sub_cat_choose_main, pattern='^maincatid_')], ADD_SUB_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_name)], ADD_SUB_CAT_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_image)],},
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
     )
     add_prod_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_prod_start, pattern='^add_prod_start$')],
-        states={
-            ADD_PROD_CHOOSE_SUB: [CallbackQueryHandler(admin_add_prod_choose_sub, pattern='^subcatid_')],
-            ADD_PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_name)],
-            ADD_PROD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_price)],
-            ADD_PROD_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_fee)],
-        },
+        states={ADD_PROD_CHOOSE_SUB: [CallbackQueryHandler(admin_add_prod_choose_sub, pattern='^subcatid_')], ADD_PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_name)], ADD_PROD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_price)], ADD_PROD_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_fee)],},
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
     )
     edit_price_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_price_start, pattern='^admin_edit_price_start$')],
-        states={
-            EDIT_PRICE_CHOOSE: [CallbackQueryHandler(admin_edit_price_choose, pattern='^editprice_')],
-            EDIT_PRICE_SET: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_price_set)],
-        },
+        states={EDIT_PRICE_CHOOSE: [CallbackQueryHandler(admin_edit_price_choose, pattern='^editprice_')], EDIT_PRICE_SET: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_price_set)],},
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
     delete_item_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(admin_delete_item_start, pattern='^delete_main_cat$'),
-            CallbackQueryHandler(admin_delete_item_start, pattern='^delete_sub_cat$'),
-            CallbackQueryHandler(admin_delete_item_start, pattern='^delete_prod$'),
-        ],
-        states={
-            DELETE_CHOOSE_ITEM: [CallbackQueryHandler(admin_delete_item_confirm, pattern='^delitem_')]
-        },
+        entry_points=[CallbackQueryHandler(admin_delete_item_start, pattern='^delete_main_cat$'), CallbackQueryHandler(admin_delete_item_start, pattern='^delete_sub_cat$'), CallbackQueryHandler(admin_delete_item_start, pattern='^delete_prod$'),],
+        states={DELETE_CHOOSE_ITEM: [CallbackQueryHandler(admin_delete_item_confirm, pattern='^delitem_')]},
         fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
 
