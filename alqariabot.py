@@ -366,28 +366,6 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
     await admin_panel(update, context)
     return ConversationHandler.END
 
-
-    with db_connect() as conn:
-        order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
-
-    if not order:
-        await update.message.reply_text(f"عذراً، لم يتم العثور على طلب بهذا الرقم `{order_id}`.", parse_mode=ParseMode.MARKDOWN)
-        await start(update, context)
-        return ConversationHandler.END
-
-    history = json.loads(order['status_history'])
-    status_text = f"🚦 *تتبع حالة الطلب رقم `{order_id}`*\n\n"
-    for event in history:
-        try:
-            date_obj = datetime.fromisoformat(event['date']).astimezone(TIMEZONE).strftime('%Y-%m-%d %I:%M %p')
-        except (ValueError, TypeError):
-            date_obj = event['date'] # Fallback for old format
-        status_text += f"🔹 *{escape_markdown(event['status'])}* - {escape_markdown(date_obj)}\n"
-    
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
-    await start(update, context)
-    return ConversationHandler.END
-
 # --- 7. البحث الذكي (v13) ---
 GREETING_KEYWORDS = ["كيف", "حالك", "السلام", "عليكم", "مرحبا", "بكم", "صباح", "مساء", "بقالة", "اهلًا", "هلا"]
 
