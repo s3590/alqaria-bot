@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 3.1 (هيكلة هرمية) ---
+# --- بقالة القرية الذكية - الإصدار 3.2 (أقسام واضحة ومنطقية) ---
 import logging
 import os
 import sqlite3
@@ -23,7 +23,7 @@ PORT = int(os.environ.get("PORT", 8443))
 TIMEZONE = pytz.timezone("Asia/Aden")
 
 # --- 2. إعداد قاعدة البيانات (تحديث كبير جداً) ---
-DB_FILE = "bot_database.v3.1.db" # اسم جديد لتجنب التعارض
+DB_FILE = "bot_database.v3.2.db" # اسم جديد لتجنب التعارض
 
 def db_connect():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -35,60 +35,68 @@ def setup_database():
         with db_connect() as conn:
             cursor = conn.cursor()
             # --- إعادة بناء الجداول بالكامل للهيكلة الجديدة ---
-            # في أول مرة، سيتم حذف الجداول القديمة إذا كانت موجودة
             cursor.execute("DROP TABLE IF EXISTS products")
             cursor.execute("DROP TABLE IF EXISTS sub_categories")
             cursor.execute("DROP TABLE IF EXISTS main_categories")
             
-            # جدول الفئات الرئيسية (دقيق وسكر, أرز...)
             cursor.execute("CREATE TABLE IF NOT EXISTS main_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, emoji TEXT)")
-            # جدول الفئات الفرعية (الدقيق الأبيض, السكر, رز الربان...)
             cursor.execute("CREATE TABLE IF NOT EXISTS sub_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, main_category_id INTEGER, name TEXT NOT NULL, image_url TEXT, FOREIGN KEY (main_category_id) REFERENCES main_categories (id))")
-            # جدول المنتجات النهائية (كيس, نص كيس...)
             cursor.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, sub_category_id INTEGER, name TEXT NOT NULL, price REAL NOT NULL, delivery_fee REAL NOT NULL, FOREIGN KEY (sub_category_id) REFERENCES sub_categories (id))")
             
-            # جداول المستخدمين والطلبات (لا تغيير)
             cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, cart TEXT DEFAULT '{}')")
             cursor.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, products TEXT NOT NULL, total_price REAL NOT NULL, status TEXT DEFAULT 'قيد المراجعة', order_date TEXT NOT NULL)")
 
-            # التحقق إذا كانت قاعدة البيانات فارغة قبل إضافة البيانات
             cursor.execute("SELECT COUNT(*) FROM main_categories")
             if cursor.fetchone()[0] == 0:
-                logger.info("Populating new hierarchical database...")
-                # 1. إضافة الفئات الرئيسية
-                main_cats = [('دقيق وسكر', '🍚'), ('أرز وبقوليات', '🍛'), ('زيوت وحليب', '🧈')]
+                logger.info("Populating new logical database structure...")
+                # 1. إضافة الفئات الرئيسية (واضحة ومفصولة)
+                main_cats = [
+                    ('الدقيق', '🍚'), 
+                    ('السكر', '🍚'), 
+                    ('الأرز', '🍛'), 
+                    ('البقوليات', '🫘'),
+                    ('الزيوت والسمن', '🧈'),
+                    ('الحليب', '🥛')
+                ]
                 cursor.executemany("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", main_cats)
                 
                 # 2. إضافة الفئات الفرعية
                 sub_cats = [
                     (1, 'الدقيق الأبيض', 'https://i.ibb.co/9hCFM5C/flour.png'),
                     (1, 'الدقيق الأسمر (طحنة)', 'https://i.ibb.co/9hCFM5C/flour.png'),
-                    (1, 'السكر', 'https://i.ibb.co/yQd9y5H/sugar.png'),
-                    (2, 'رز الربان', 'https://i.ibb.co/b3vY2W3/rice.png'),
-                    (2, 'العدس الأحمر', None),
-                    (3, 'زيت الطبخ', 'https://i.ibb.co/hRk1V2g/oil.png'),
-                    (3, 'حليب البودرة', None)
+                    (2, 'السكر الأبيض', 'https://i.ibb.co/yQd9y5H/sugar.png'),
+                    (3, 'رز الربان', 'https://i.ibb.co/b3vY2W3/rice.png'),
+                    (4, 'العدس الأحمر', None),
+                    (5, 'زيت الطبخ', 'https://i.ibb.co/hRk1V2g/oil.png'),
+                    (6, 'حليب البودرة', None)
                 ]
                 cursor.executemany("INSERT INTO sub_categories (main_category_id, name, image_url) VALUES (?, ?, ?)", sub_cats)
 
                 # 3. إضافة المنتجات النهائية
                 products = [
+                    # منتجات الدقيق الأبيض
                     (1, 'كيس (50 كيلو)', 12700, 1000), (1, 'نص كيس (25 كيلو)', 6350, 500),
+                    # منتجات الدقيق الأسمر
                     (2, 'كيس (45 كيلو)', 12000, 1000), (2, 'نص كيس (22.5 كيلو)', 6000, 500),
+                    # منتجات السكر
                     (3, 'كيس (50 كيلو)', 19000, 1000), (3, 'نص كيس (25 كيلو)', 9500, 500), (3, 'قطمة (10 كيلو)', 3800, 200),
+                    # منتجات رز الربان
                     (4, 'كيس (10 كيلو)', 7400, 300), (4, 'كيس (5 كيلو)', 3800, 200),
+                    # منتجات العدس
                     (5, '1 كيلو', 800, 50), (5, 'نص كيلو', 400, 25),
+                    # منتجات الزيت
                     (6, 'جالون (4 لتر)', 3750, 200),
+                    # منتجات الحليب
                     (7, '1 كيلو', 1900, 50)
                 ]
                 cursor.executemany("INSERT INTO products (sub_category_id, name, price, delivery_fee) VALUES (?, ?, ?, ?)", products)
 
             conn.commit()
-        logger.info("Database v3.1 setup successful.")
+        logger.info("Database v3.2 setup successful.")
     except Exception as e:
         logger.error(f"DATABASE SETUP FAILED: {e}", exc_info=True)
 
-# --- 3. دوال مساعدة ---
+# --- 3. دوال مساعدة (لا تغيير) ---
 def get_product_details(prod_id):
     with db_connect() as conn:
         return conn.execute("SELECT p.*, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id WHERE p.id = ?", (prod_id,)).fetchone()
@@ -137,7 +145,7 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت ---
+# --- 4. واجهة البوت (لا تغيير) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب اسم المنتج الذي تبحث عنه مباشرة**."
     keyboard = [
@@ -193,7 +201,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
 
-# --- 5. المعالج الموحد للأزرار ---
+# --- 5. المعالج الموحد للأزرار (تحديث المنطق) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -212,32 +220,25 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         main_cat_id = data.split("_")[1]
         with db_connect() as conn:
             sub_cats = conn.execute("SELECT * FROM sub_categories WHERE main_category_id = ?", (main_cat_id,)).fetchall()
-        keyboard = [[InlineKeyboardButton(f"{sc['name']}", callback_data=f"subcat_{sc['id']}")] for sc in sub_cats]
-        keyboard.append([InlineKeyboardButton("« العودة للأقسام الرئيسية", callback_data="browse_main_cats")])
-        await query.edit_message_text("اختر المنتج:", reply_markup=InlineKeyboardMarkup(keyboard))
+        
+        # ★★★ التعديل الجوهري هنا ★★★
+        # إذا كان هناك فئة فرعية واحدة فقط، انتقل مباشرة إلى عرض منتجاتها
+        if len(sub_cats) == 1:
+            sub_cat = sub_cats[0]
+            await show_products_for_subcategory(query, context, sub_cat['id'], main_cat_id)
+        else:
+            # إذا كان هناك أكثر من فئة فرعية، اعرضها كالمعتاد
+            keyboard = [[InlineKeyboardButton(f"{sc['name']}", callback_data=f"subcat_{sc['id']}")] for sc in sub_cats]
+            keyboard.append([InlineKeyboardButton("« العودة للأقسام الرئيسية", callback_data="browse_main_cats")])
+            await query.edit_message_text("اختر النوع:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("subcat_"):
         sub_cat_id = data.split("_")[1]
         with db_connect() as conn:
-            products = conn.execute("SELECT * FROM products WHERE sub_category_id = ?", (sub_cat_id,)).fetchall()
             sub_cat = conn.execute("SELECT * FROM sub_categories WHERE id = ?", (sub_cat_id,)).fetchone()
-        
-        caption = f"اختر الحجم المطلوب من *{escape_markdown(sub_cat['name'])}*:"
-        keyboard_buttons = [[InlineKeyboardButton(f"➕ {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in products]
-        keyboard_buttons.append([InlineKeyboardButton("« العودة للمنتجات", callback_data=f"maincat_{sub_cat['main_category_id']}")])
-        keyboard = InlineKeyboardMarkup(keyboard_buttons)
-        
-        try:
-            if sub_cat['image_url']:
-                await context.bot.send_photo(chat_id=user_id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
-                await query.delete_message()
-            else:
-                await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
-        except Exception as e:
-            logger.error(f"Error sending photo for sub_cat {sub_cat_id}: {e}. Sending text message instead.")
-            await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+        await show_products_for_subcategory(query, context, sub_cat_id, sub_cat['main_category_id'])
 
-    # --- باقي المنطق ---
+    # --- باقي المنطق (لا تغيير) ---
     elif data == "main_menu": await start(update, context)
     elif data.startswith("add_"):
         prod_id = data.split("_")[1]
@@ -324,7 +325,28 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         keyboard = [[InlineKeyboardButton("✏️ تعديل سعر منتج", callback_data="admin_edit_price_start")], [InlineKeyboardButton("« العودة", callback_data="main_menu")]]
         await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- 6. محادثة تعديل الأسعار للمدير ---
+# --- 6. دالة مساعدة جديدة لعرض المنتجات ---
+async def show_products_for_subcategory(query, context, sub_cat_id, main_cat_id):
+    with db_connect() as conn:
+        products = conn.execute("SELECT * FROM products WHERE sub_category_id = ?", (sub_cat_id,)).fetchall()
+        sub_cat = conn.execute("SELECT * FROM sub_categories WHERE id = ?", (sub_cat_id,)).fetchone()
+    
+    caption = f"اختر الحجم المطلوب من *{escape_markdown(sub_cat['name'])}*:"
+    keyboard_buttons = [[InlineKeyboardButton(f"➕ {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in products]
+    keyboard_buttons.append([InlineKeyboardButton("« العودة للأقسام", callback_data="browse_main_cats")])
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
+    
+    try:
+        if sub_cat['image_url']:
+            await context.bot.send_photo(chat_id=query.effective_chat.id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+            await query.delete_message()
+        else:
+            await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception as e:
+        logger.error(f"Error sending photo for sub_cat {sub_cat_id}: {e}. Sending text message instead.")
+        await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+
+# --- 7. محادثة تعديل الأسعار للمدير (لا تغيير) ---
 EDIT_PRICE_CHOOSE, EDIT_PRICE_SET = range(2)
 async def admin_edit_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn:
@@ -363,7 +385,7 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
     return ConversationHandler.END
 
-# --- 7. البحث المباشر ---
+# --- 8. البحث المباشر (لا تغيير) ---
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     search_term = update.message.text.strip().lower()
     if len(search_term) < 2: return
@@ -376,7 +398,7 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     keyboard = [[InlineKeyboardButton(f"➕ {p['sub_cat_name']} {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in results]
     await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
 
-# --- 8. الإعداد والتشغيل ---
+# --- 9. الإعداد والتشغيل (لا تغيير) ---
 def main() -> None:
     setup_database()
     application = Application.builder().token(TOKEN).build()
@@ -392,7 +414,7 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(edit_price_conv)
-    application.add_handler(CallbackQueryHandler(unified_button_handler)) # استخدام المعالج الموحد
+    application.add_handler(CallbackQueryHandler(unified_button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
     logger.info("Starting bot with webhook...")
