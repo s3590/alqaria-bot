@@ -1,17 +1,14 @@
 import logging
 import os
 import sqlite3
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters,
     ConversationHandler
 )
 from telegram.constants import ParseMode
-from flask import Flask, request
-import threading
 
-# --- 1. الإعدادات الأساسية (الكود كما هو) ---
+# --- 1. الإعدادات الأساسية ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -20,6 +17,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 WEB_URL = os.environ.get("WEB_URL")
+# المنفذ الذي ستستمع إليه Render
 PORT = int(os.environ.get("PORT", 8443))
 
 # --- 2. إعداد قاعدة البيانات (الكود كما هو) ---
@@ -28,7 +26,6 @@ def db_connect():
     return sqlite3.connect(DB_FILE)
 
 def setup_database():
-    # ... (الكود كما هو)
     try:
         with db_connect() as conn:
             cursor = conn.cursor()
@@ -47,7 +44,6 @@ def setup_database():
 
 # --- 3. دوال مساعدة (الكود كما هو) ---
 def get_product_details(prod_id):
-    # ... (الكود كما هو)
     with db_connect() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT name, price, delivery_fee FROM products WHERE id = ?", (prod_id,))
@@ -57,12 +53,10 @@ def get_product_details(prod_id):
     return None
 
 def is_admin(update: Update) -> bool:
-    # ... (الكود كما هو)
     return str(update.effective_user.id) == str(ADMIN_CHAT_ID)
 
 # --- 4. واجهة البوت (الكود كما هو) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود كما هو)
     context.user_data.setdefault('cart', {})
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_cats")],
@@ -200,12 +194,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # --- 5. البحث ولوحة تحكم المدير (الكود كما هو) ---
 SEARCH = range(1)
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("اكتب اسم المنتج الذي تبحث عنه:")
     return SEARCH
 async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     search_term = update.message.text.strip().lower()
     with db_connect() as conn:
         cursor = conn.cursor()
@@ -220,78 +212,39 @@ async def search_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return ConversationHandler.END
 async def cancel_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     await start(update, context)
     return ConversationHandler.END
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود كما هو)
     query = update.callback_query
     await query.edit_message_text("👑 لوحة تحكم المدير (قيد التطوير)...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="main_menu")]]))
 
-# --- 6. إعداد تطبيق البوت ---
-setup_database()
-application = Application.builder().token(TOKEN).build()
-
-# إضافة المعالجات
-# ... (الكود كما هو)
-search_conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(pattern='^search_start$', callback=search_start)],
-    states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_product)]},
-    fallbacks=[CallbackQueryHandler(pattern='^main_menu$', callback=cancel_search)]
-)
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(pattern='^main_menu$', callback=start))
-application.add_handler(search_conv_handler)
-application.add_handler(CallbackQueryHandler(pattern='^admin_panel$', callback=admin_panel))
-application.add_handler(CallbackQueryHandler(button_handler))
-
-# --- 7. الجزء الجديد والمهم: دمج Flask و PTB ---
-app = Flask(__name__)
-bot_ready = threading.Event()
-
-@app.route("/")
-def index():
-    return "Flask server is running!"
-
-@app.route(f'/{TOKEN}', methods=['POST'])
-async def webhook():
-    if not bot_ready.is_set():
-        logger.warning("Received update before bot is ready. Ignoring.")
-        return "Bot not ready", 503
-
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        await application.process_update(update)
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Error processing update: {e}", exc_info=True)
-        return "Error", 500
-
-def run_bot():
-    # --- هذا هو التعديل الحاسم ---
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def main() -> None:
+    """الدالة الرئيسية لتشغيل البوت."""
+    setup_database()
     
-    try:
-        # الآن نقوم بتشغيل كل شيء داخل هذه الحلقة
-        loop.run_until_complete(application.initialize())
-        loop.run_until_complete(application.bot.set_webhook(url=f"{WEB_URL}/{TOKEN}", allowed_updates=Update.ALL_TYPES))
-        
-        # إذا وصلنا إلى هنا، كل شيء نجح
-        bot_ready.set()
-        logger.info("Webhook has been set and bot is ready!")
-        
-        # يمكننا إبقاء الحلقة تعمل إذا احتجنا مهام خلفية أخرى
-        # loop.run_forever() 
-    except Exception as e:
-        logger.error(f"An error occurred during bot setup in thread: {e}", exc_info=True)
-    finally:
-        loop.close()
+    application = Application.builder().token(TOKEN).build()
 
+    # إضافة المعالجات
+    search_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(pattern='^search_start$', callback=search_start)],
+        states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_product)]},
+        fallbacks=[CallbackQueryHandler(pattern='^main_menu$', callback=cancel_search)]
+    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(pattern='^main_menu$', callback=start))
+    application.add_handler(search_conv_handler)
+    application.add_handler(CallbackQueryHandler(pattern='^admin_panel$', callback=admin_panel))
+    application.add_handler(CallbackQueryHandler(button_handler))
 
-# --- 8. نقطة البداية ---
-if __name__ != '__main__':
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.start()
+    # تشغيل البوت مع Webhook
+    # المكتبة ستقوم بتشغيل خادم ويب بسيط بنفسها
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"{WEB_URL}/{TOKEN}"
+    )
 
-logger.info("--- SCRIPT INITIALIZATION COMPLETE ---")
+if __name__ == "__main__":
+    main()
+                
