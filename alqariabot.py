@@ -388,8 +388,7 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
         with db_connect() as conn:
             conn.execute("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", (name, emoji))
             conn.commit()
-        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي
- '{name}' بنجاح.")
+        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي'{name}' بنجاح.")
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
