@@ -432,8 +432,7 @@ async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE)
     del context.user_data['new_prod_sub_id']
     del context.user_data['new_prod_name']
     del context.user_data['new_prod_price']
-    await start
-(update, context)
+    await start(update, context)
     return ConversationHandler.END
 
 # --- 7.2 محادثات تعديل السعر ---
