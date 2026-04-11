@@ -1,3 +1,4 @@
+# --- بقالة القرية الذكية - الإصدار 15.0 (النسخة النهائية والمختبرة) ---
 import logging
 import os
 import sqlite3
@@ -351,19 +352,52 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
     if not new_price_text.isdigit():
         await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
         return EDIT_PRICE_SET
+    new_price *{title}*\n"
+    report_text += f"*{'='*20}*\n"
+    report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
+    report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
+    report_text += "📈 *المنتجات الأكثر مبيعًا:*\n"
     
-    # هذا هو الجزء الذي تم تصحيحه بالكامل
-    new_price = int(new_price_text)
-    prod_id = context.user_data.get('product_to_edit')
+    for i, (prod_id, qty) in enumerate(sorted_products[:5]):
+        details = get_product_details(prod_id)
+        if details:
+            full_name = f"{details['sub_cat_name']} {details['name']}"
+            report_text += f"{i+1}. {full_name} - *(الكمية: {qty})*\n"
+            
+    await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+
+# --- 6. تتبع الطلب للعميل ---
+TRACK_ORDER_ID = range(1)
+async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
+    return TRACK_ORDER_ID
+
+async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    order_id = update.message.text
+    if not order_id.isdigit():
+        await update.message.reply_text("رقم الطلب غير صالح. الرجاء إرسال أرقام فقط.")
+        await start(update, context)
+        return ConversationHandler.END
+
     with db_connect() as conn:
-        conn.execute("UPDATE products SET price = ? WHERE id = ?", (new_price, prod_id))
-        conn.commit()
-    item = get_product_details(prod_id)
-    full_name = f"{item['sub_cat_name']} {item['name']}"
-    msg = f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
-    del context.user_data['product_to_edit']
-    await admin_panel(update, context)
+        order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
+
+    if not order:
+        await update.message.reply_text(f"عذراً، لم يتم العثور على طلب بهذا الرقم `{order_id}`.", parse_mode=ParseMode.MARKDOWN)
+        await start(update, context)
+        return ConversationHandler.END
+
+    history = json.loads(order['status_history'])
+    status_text = f"🚦 *تتبع حالة الطلب رقم `{order_id}`*\n\n"
+    for event in history:
+        try:
+            date_obj = datetime.fromisoformat(event['date']).astimezone(TIMEZONE).strftime('%Y-%m-%d %I:%M %p')
+        except (ValueError, TypeError):
+            date_obj = event['date'] # Fallback for old format
+        status_text += f"🔹 *{escape_markdown(event['status'])}* - {escape_markdown(date_obj)}\n"
+    
+    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
+    await start(update, context)
     return ConversationHandler.END
 
 # --- 7. البحث الذكي (v13) ---
@@ -698,3 +732,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
