@@ -350,31 +350,40 @@ async def admin_edit_price_choose(update: Update, context: ContextTypes.DEFAULT_
 async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_price_text = update.message.text
     if not new_price_text.isdigit():
-        await update.mes20}*\n"
-    report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
-    report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
-    report_text += "📈 *المنتجات الأكثر مبيعًا:*\n"
+        await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
+        return EDIT_PRICE_SET
     
-    for i, (prod_id, qty) in enumerate(sorted_products[:5]):
-        details = get_product_details(prod_id)
-        if details:
-            full_name = f"{details['sub_cat_name']} {details['name']}"
-            report_text += f"{i+1}. {full_name} - *(الكمية: {qty})*\n"
-            
-    await update.callback_query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+    new_price = int(new_price_text)
+    prod_id = context.user_data['product_to_edit']
+    
+    with db_connect() as conn:
+        conn.execute("UPDATE products SET price = ? WHERE id = ?", (new_price, prod_id))
+        conn.commit()
+    
+    item = get_product_details(prod_id)
+    full_name = f"{item['sub_cat_name']} {item['name']}"
+    await update.message.reply_text(f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح.", parse_mode=ParseMode.MARKDOWN_V2)
+    
+    del context.user_data['product_to_edit']
+    
+    # استدعاء admin_panel لإظهار لوحة التحكم بعد التعديل
+    # نحتاج إلى استدعائها مع query الذي بدأ المحادثة
+    query = update.callback_query or (await context.bot.send_message(chat_id=update.effective_chat.id, text="..."))
+    
+    # للتعامل مع الحالات التي لا يكون فيها query متاحًا بسهولة بعد رسالة نصية
+    # الأفضل هو إعادة بناء الـ update object بشكل مبسط للوحة التحكم
+    class MockQuery:
+        def __init__(self, update_obj):
+            self.message = update_obj.message
+            self.from_user = update_obj.effective_user
+        async def edit_message_text(self, *args, **kwargs):
+            return await self.message.reply_text(*args, **kwargs)
 
-# --- 6. تتبع الطلب للعميل ---
-TRACK_ORDER_ID = range(1)
-async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
-    return TRACK_ORDER_ID
-
-async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    order_id = update.message.text
-    if not order_id.isdigit():
-        await update.message.reply_text("رقم الطلب غير صالح. الرجاء إرسال أرقام فقط.")
-        await start(update, context)
-        return ConversationHandler.END
+    mock_update = type('MockUpdate', (), {'callback_query': MockQuery(update), 'effective_user': update.effective_user})
+    await admin_panel(mock_update, context)
+    
+    return ConversationHandler.END
+    
 
     with db_connect() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
