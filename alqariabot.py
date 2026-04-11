@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 10.0 (النسخة المستقرة) ---
+# --- بقالة القرية الذكية - الإصدار 11.0 (النسخة المستقرة والمحسّنة) ---
 import logging
 import os
 import sqlite3
@@ -119,7 +119,7 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت الرئيسية ---
+# --- 4. واجهة البوت الرئيسية (★★★ تم تكبير الأزرار ★★★) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب طلبك مباشرة** (مثال: 2 كيس سكر)."
     keyboard = [
@@ -159,7 +159,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard_buttons.append([InlineKeyboardButton(f"➕ {full_name[:20]}", callback_data=f"qty_add_{p_id}")])
             keyboard_buttons.append([InlineKeyboardButton(f"➖ {full_name[:20]}", callback_data=f"qty_rem_{p_id}")])
             keyboard_buttons.append([InlineKeyboardButton(f"❌ حذف {full_name[:15]}", callback_data=f"qty_del_{p_id}")])
-            keyboard_buttons.append([InlineKeyboardButton(" ", callback_data="ignore")])
+            keyboard_buttons.append([InlineKeyboardButton(" ", callback_data="ignore")]) # Spacer
 
     keyboard_buttons.extend([
         [InlineKeyboardButton("✅ إرسال الطلب للمراجعة", callback_data="confirm_order")],
@@ -173,8 +173,8 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
-        
-# --- 5. المعالج الموحد للأزرار ---
+
+# --- 5. المعالج الموحد للأزرار (★★★ تم إصلاحه وتكبير الأزرار ★★★) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -182,6 +182,18 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
 
     if data == "ignore": return
+
+    # --- منطق إضافة المنتجات (تم إصلاحه) ---
+    if data.startswith("add_"):
+        prod_id = data.split("_")[1]
+        cart = get_user_cart(user_id)
+        cart[str(prod_id)] = cart.get(str(prod_id), 0) + 1
+        save_user_cart(user_id, cart)
+        item = get_product_details(prod_id)
+        full_name = f"{item['sub_cat_name']} {item['name']}"
+        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False) # رسالة التأكيد
+        # لا تفعل شيئًا آخر، لتبقى الأزرار كما هي
+        return # مهم جدًا لإيقاف تنفيذ باقي الشروط
 
     if data.startswith("add_clarify_"):
         prod_id = data.split("_")[2]
@@ -194,16 +206,8 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.delete_message()
         return
 
-    if data.startswith("add_"):
-        prod_id = data.split("_")[1]
-        cart = get_user_cart(user_id)
-        cart[str(prod_id)] = cart.get(str(prod_id), 0) + 1
-        save_user_cart(user_id, cart)
-        item = get_product_details(prod_id)
-        full_name = f"{item['sub_cat_name']} {item['name']}"
-        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False)
-    
-    elif data == "browse_main_cats":
+    # --- منطق التصفح ---
+    if data == "browse_main_cats":
         with db_connect() as conn:
             cats = conn.execute("SELECT * FROM main_categories ORDER BY id").fetchall()
         keyboard = [[InlineKeyboardButton(f"{cat['emoji']} {cat['name']}", callback_data=f"maincat_{cat['id']}")] for cat in cats]
@@ -230,6 +234,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         sub_cat_id = data.split("_")[1]
         await show_products_for_subcategory(query, context, sub_cat_id)
 
+    # --- منطق السلة والطلبات ---
     elif data == "main_menu": await start(update, context)
     elif data == "view_cart": await view_cart(update, context)
     elif data.startswith("qty_"):
@@ -309,21 +314,25 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"📦 *طلب رقم:* `{order['id']}`\n📅 *التاريخ:* {escape_markdown(order['order_date'])}\n💰 *الإجمالي:* {int(order['total_price'])} ريال\n🚦 *الحالة:* {escape_markdown(order['status'])}\n--------------------\n"
         await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="main_menu")]]))
     
+    # --- منطق لوحة التحكم ---
     elif data == "admin_panel": await admin_panel(update, context)
     elif data == "admin_add_menu": await admin_add_menu(update, context)
     elif data == "admin_delete_menu": await admin_delete_menu(update, context)
 
-# --- 6. دالة مساعدة لعرض المنتجات ---
+# --- 6. دالة مساعدة لعرض المنتجات (★★★ تم إصلاحها وتكبير الأزرار ★★★) ---
 async def show_products_for_subcategory(query, context, sub_cat_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE sub_category_id = ? ORDER BY price", (sub_cat_id,)).fetchall()
         sub_cat = conn.execute("SELECT * FROM sub_categories WHERE id = ?", (sub_cat_id,)).fetchone()
     
     caption = f"اختر الحجم المطلوب من *{escape_markdown(sub_cat['name'])}*:"
+    # كل زر في سطر
     keyboard_buttons = [[InlineKeyboardButton(f"➕ {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in products]
     
+    # إضافة زر العودة المناسب
     with db_connect() as conn:
         sub_cats_in_main = conn.execute("SELECT COUNT(*) FROM sub_categories WHERE main_category_id = ?", (sub_cat['main_category_id'],)).fetchone()[0]
+    
     if sub_cats_in_main > 1:
         keyboard_buttons.append([InlineKeyboardButton("« العودة للأنواع", callback_data=f"maincat_{sub_cat['main_category_id']}")])
     else:
@@ -332,17 +341,17 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
     keyboard = InlineKeyboardMarkup(keyboard_buttons)
     
     try:
-        if sub_cat['image_url']:
-            await query.delete_message()
-            await context.bot.send_photo(chat_id=query.effective_chat.id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+        # استخدام edit_message_caption للصورة أو edit_message_text للنص
+        if query.message.photo:
+            await query.edit_message_caption(caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
         else:
             await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
         logger.error(f"Error in show_products_for_subcategory: {e}")
+        # حل بديل في حال حدوث خطأ (مثل عدم وجود صورة لتعديلها)
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
-        
 
-# --- 7. لوحة تحكم المدير الكاملة ---
+# --- 7. لوحة تحكم المدير الكاملة (★★★ تم تكبير الأزرار ★★★) ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
