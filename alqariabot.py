@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 4.0 (الدمج الكامل والمحافظة على الميزات) ---
+# --- بقالة القرية الذكية - الإصدار 5.0 (البوت الذكي) ---
 import logging
 import os
 import sqlite3
@@ -23,7 +23,7 @@ PORT = int(os.environ.get("PORT", 8443))
 TIMEZONE = pytz.timezone("Asia/Aden")
 
 # --- 2. إعداد قاعدة البيانات (الهيكل النهائي) ---
-DB_FILE = "bot_database.v4.0.db"
+DB_FILE = "bot_database.v4.0.db" # نستخدم نفس قاعدة البيانات السابقة
 
 def db_connect():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -45,11 +45,8 @@ def setup_database():
             cursor.execute("SELECT COUNT(*) FROM main_categories")
             if cursor.fetchone()[0] == 0:
                 logger.info("Populating database with initial data (v4.0)...")
-                # 1. إضافة الفئات الرئيسية (واضحة ومفصولة)
                 main_cats = [('الدقيق', '🍚'), ('السكر', '🍚'), ('الأرز', '🍛'), ('البقوليات', '🫘'), ('الزيوت والسمن', '🧈'), ('الحليب', '🥛')]
                 cursor.executemany("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", main_cats)
-                
-                # 2. إضافة الفئات الفرعية
                 sub_cats = [
                     (1, 'الدقيق الأبيض', 'https://i.ibb.co/9hCFM5C/flour.png'), (1, 'الدقيق الأسمر (طحنة)', 'https://i.ibb.co/9hCFM5C/flour.png'),
                     (2, 'السكر الأبيض', 'https://i.ibb.co/yQd9y5H/sugar.png'),
@@ -59,8 +56,6 @@ def setup_database():
                     (6, 'حليب البودرة', None)
                 ]
                 cursor.executemany("INSERT INTO sub_categories (main_category_id, name, image_url) VALUES (?, ?, ?)", sub_cats)
-
-                # 3. إضافة المنتجات النهائية
                 products = [
                     (1, 'كيس (50 كيلو)', 12700, 1000), (1, 'نص كيس (25 كيلو)', 6350, 500),
                     (2, 'كيس (45 كيلو)', 12000, 1000), (2, 'نص كيس (22.5 كيلو)', 6000, 500),
@@ -76,7 +71,7 @@ def setup_database():
     except Exception as e:
         logger.error(f"DATABASE SETUP FAILED: {e}", exc_info=True)
 
-# --- 3. دوال مساعدة ---
+# --- 3. دوال مساعدة (لا تغيير) ---
 def get_product_details(prod_id):
     with db_connect() as conn:
         return conn.execute("SELECT p.*, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id WHERE p.id = ?", (prod_id,)).fetchone()
@@ -125,9 +120,9 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت الرئيسية ---
+# --- 4. واجهة البوت الرئيسية (لا تغيير) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب اسم المنتج الذي تبحث عنه مباشرة**."
+    welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب طلبك مباشرة** (مثال: 2 كيس سكر)."
     keyboard = [
         [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_main_cats")],
         [InlineKeyboardButton("🛍️ عرض سلتي", callback_data="view_cart")],
@@ -180,14 +175,25 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
-# --- 5. المعالج الموحد للأزرار ---
+
+# --- 5. المعالج الموحد للأزرار (تعديل بسيط) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    await query.answer() # ★★★ تعديل: إزالة رسالة التأكيد من هنا
     data = query.data
     user_id = update.effective_user.id
 
-    if data == "browse_main_cats":
+    if data.startswith("add_"):
+        prod_id = data.split("_")[1]
+        cart = get_user_cart(user_id)
+        cart[prod_id] = cart.get(prod_id, 0) + 1
+        save_user_cart(user_id, cart)
+        item = get_product_details(prod_id)
+        full_name = f"{item['sub_cat_name']} {item['name']}"
+        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False) # ★★★ تعديل: إضافة رسالة التأكيد هنا
+    
+    # (بقية الكود في هذه الدالة لا يتغير)
+    elif data == "browse_main_cats":
         with db_connect() as conn:
             cats = conn.execute("SELECT * FROM main_categories ORDER BY id").fetchall()
         keyboard = [[InlineKeyboardButton(f"{cat['emoji']} {cat['name']}", callback_data=f"maincat_{cat['id']}")] for cat in cats]
@@ -211,14 +217,6 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         await show_products_for_subcategory(query, context, sub_cat_id)
 
     elif data == "main_menu": await start(update, context)
-    elif data.startswith("add_"):
-        prod_id = data.split("_")[1]
-        cart = get_user_cart(user_id)
-        cart[prod_id] = cart.get(prod_id, 0) + 1
-        save_user_cart(user_id, cart)
-        item = get_product_details(prod_id)
-        full_name = f"{item['sub_cat_name']} {item['name']}"
-        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False)
     elif data == "view_cart": await view_cart(update, context)
     elif data.startswith("qty_"):
         action, prod_id = data.split("_")[1], data.split("_")[2]
@@ -293,7 +291,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data == "admin_add_menu": await admin_add_menu(update, context)
     elif data == "admin_delete_menu": await admin_delete_menu(update, context)
 
-# --- 6. دالة مساعدة جديدة لعرض المنتجات ---
+# --- 6. دالة مساعدة لعرض المنتجات (لا تغيير) ---
 async def show_products_for_subcategory(query, context, sub_cat_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE sub_category_id = ? ORDER BY price", (sub_cat_id,)).fetchall()
@@ -321,7 +319,7 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
         logger.error(f"Error sending photo for sub_cat {sub_cat_id}: {e}. Sending text message instead.")
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
 
-# --- 7. لوحة تحكم المدير الكاملة ---
+# --- 7. لوحة تحكم المدير الكاملة (لا تغيير) ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
@@ -335,6 +333,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("« العودة", callback_data="main_menu")]
     ]
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# (بقية دوال المدير هنا... لا تغيير)
 # --- 7.1 محادثات الإضافة ---
 ADD_MAIN_CAT_NAME, ADD_MAIN_CAT_EMOJI = range(2)
 ADD_SUB_CAT_CHOOSE_MAIN, ADD_SUB_CAT_NAME, ADD_SUB_CAT_IMAGE = range(3)
@@ -367,7 +367,7 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
-    await start(update, context) # العودة للقائمة الرئيسية
+    await start(update, context)
     return ConversationHandler.END
 
 async def admin_add_sub_cat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,7 +401,8 @@ async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_
 async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn:
         sub_cats = conn.execute("SELECT * FROM sub_categories").fetchall()
-    keyboard = [[InlineKeyboardButton(sc['name'], callback_data=f"subcatid_{sc['id']}")] for sc in sub_cats]
+    keyboard = [[InlineKeyboardButton(sc['name'], callback_data
+=f"subcatid_{sc['id']}")] for sc in sub_cats]
     keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
     await update.callback_query.edit_message_text("اختر النوع الذي ينتمي إليه المنتج النهائي:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ADD_PROD_CHOOSE_SUB
@@ -517,7 +518,6 @@ async def admin_delete_item_confirm(update: Update, context: ContextTypes.DEFAUL
     elif item_type == "prod": table_name = "products"
 
     with db_connect() as conn:
-        # تفعيل مفاتيح الربط الخارجية لحذف متتالي
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"DELETE FROM {table_name} WHERE id = ?", (item_id,))
         conn.commit()
@@ -540,21 +540,76 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     return ConversationHandler.END
 
-# --- 8. البحث المباشر ---
+# --- 8. البحث الذكي ---
+async def parse_text_order(text: str):
+    text = text.strip()
+    
+    # استخراج الكمية (الرقم الأول في الجملة)
+    quantity_match = re.match(r'^\d+', text)
+    quantity = 1
+    if quantity_match:
+        quantity = int(quantity_match.group(0))
+        text = text[quantity_match.end():].strip()
+
+    # البحث عن أفضل منتج مطابق
+    with db_connect() as conn:
+        all_products = conn.execute("""
+            SELECT p.id, p.name as prod_name, sc.name as sub_cat_name
+            FROM products p
+            JOIN sub_categories sc ON p.sub_category_id = sc.id
+        """).fetchall()
+
+    best_match = None
+    highest_score = 0
+
+    for product in all_products:
+        score = 0
+        full_name = f"{product['sub_cat_name']} {product['prod_name']}"
+        
+        # حساب درجة التطابق
+        for word in text.split():
+            if word in full_name:
+                score += 1
+        
+        if score > highest_score:
+            highest_score = score
+            best_match = product
+
+    if best_match and highest_score > 0:
+        return best_match['id'], quantity
+    
+    return None, None
+
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    search_term = update.message.text.strip().lower()
+    user_id = update.effective_user.id
+    text = update.message.text
+    
+    # --- محاولة فهم الطلب كنص أولاً ---
+    product_id, quantity = await parse_text_order(text)
+    
+    if product_id:
+        cart = get_user_cart(user_id)
+        cart[str(product_id)] = cart.get(str(product_id), 0) + quantity
+        save_user_cart(user_id, cart)
+        
+        item = get_product_details(product_id)
+        full_name = f"{item['sub_cat_name']} {item['name']}"
+        await update.message.reply_text(f"✅ تم إضافة (x{quantity}) من '{full_name}' إلى السلة.")
+        return
+
+    # --- إذا فشل الفهم، قم بالبحث العادي ---
+    search_term = text.strip().lower()
     if len(search_term) < 2: return
     with db_connect() as conn:
         results = conn.execute("""
-            SELECT p.id, p.name, p.price, sc.name as sub_cat_name, mc.name as main_cat_name
+            SELECT p.id, p.name, p.price, sc.name as sub_cat_name
             FROM products p 
             JOIN sub_categories sc ON p.sub_category_id = sc.id
-            JOIN main_categories mc ON sc.main_category_id = mc.id
-            WHERE p.name LIKE ? OR sc.name LIKE ? OR mc.name LIKE ?
-        """, (f'%{search_term}%', f'%{search_term}%', f'%{search_term}%')).fetchall()
+            WHERE p.name LIKE ? OR sc.name LIKE ?
+        """, (f'%{search_term}%', f'%{search_term}%')).fetchall()
         
     if not results:
-        await update.message.reply_text(f"عذراً، لم يتم العثور على منتجات تطابق بحثك عن '{search_term}'.")
+        await update.message.reply_text(f"عذراً، لم أجد منتجات تطابق بحثك عن '{search_term}'.\nيمكنك تجربة التصفح من الأزرار.")
         return
         
     msg = f"🔍 *نتائج البحث عن '{escape_markdown(search_term)}':*"
