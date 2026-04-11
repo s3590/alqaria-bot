@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 9.2 (الإصلاح النهائي) ---
+# --- بقالة القرية الذكية - الإصدار 10.0 (النسخة المستقرة) ---
 import logging
 import os
 import sqlite3
@@ -173,7 +173,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
-
+        
 # --- 5. المعالج الموحد للأزرار ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -340,6 +340,7 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
     except Exception as e:
         logger.error(f"Error in show_products_for_subcategory: {e}")
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+        
 
 # --- 7. لوحة تحكم المدير الكاملة ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -384,7 +385,6 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
         with db_connect() as conn:
             conn.execute("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", (name, emoji))
             conn.commit()
-        # ★★★ السطر المُصلَح ★★★
         await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي '{name}' بنجاح.")
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
@@ -419,6 +419,15 @@ async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_
     del context.user_data['new_sub_cat_name']
     await start(update, context)
     return ConversationHandler.END
+
+async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with db_connect() as conn:
+        sub_cats = conn.execute("SELECT * FROM sub_categories").fetchall()
+    keyboard = [[InlineKeyboardButton(sc['name'], callback_data=f"subcatid_{sc['id']}")] for sc in sub_cats]
+    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
+    await update.callback_query.edit_message_text("اختر النوع الذي ينتمي إليه المنتج النهائي:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ADD_PROD_CHOOSE_SUB
+async def admin_add_prod_choose_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['new_prod_sub_id'] = update.callback_query.data.split("_")[1]
     await update.callback_query.edit_message_text("أرسل اسم المنتج النهائي (مثال: كيس 50 كيلو).")
     return ADD_PROD_NAME
