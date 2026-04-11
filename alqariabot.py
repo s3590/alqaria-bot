@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 5.0 (البوت الذكي) ---
+# --- بقالة القرية الذكية - الإصدار 6.0 (الفهم الشامل) ---
 import logging
 import os
 import sqlite3
@@ -13,7 +13,7 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
-# --- 1. الإعدادات الأساسية ---
+# --- 1. الإعدادات الأساسية (لا تغيير) ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -22,8 +22,8 @@ WEB_URL = os.environ.get("WEB_URL")
 PORT = int(os.environ.get("PORT", 8443))
 TIMEZONE = pytz.timezone("Asia/Aden")
 
-# --- 2. إعداد قاعدة البيانات (الهيكل النهائي) ---
-DB_FILE = "bot_database.v4.0.db" # نستخدم نفس قاعدة البيانات السابقة
+# --- 2. إعداد قاعدة البيانات (لا تغيير) ---
+DB_FILE = "bot_database.v4.0.db"
 
 def db_connect():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -176,10 +176,10 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
 
-# --- 5. المعالج الموحد للأزرار (تعديل بسيط) ---
+# --- 5. المعالج الموحد للأزرار (لا تغيير) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer() # ★★★ تعديل: إزالة رسالة التأكيد من هنا
+    await query.answer()
     data = query.data
     user_id = update.effective_user.id
 
@@ -190,9 +190,8 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         save_user_cart(user_id, cart)
         item = get_product_details(prod_id)
         full_name = f"{item['sub_cat_name']} {item['name']}"
-        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False) # ★★★ تعديل: إضافة رسالة التأكيد هنا
+        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False)
     
-    # (بقية الكود في هذه الدالة لا يتغير)
     elif data == "browse_main_cats":
         with db_connect() as conn:
             cats = conn.execute("SELECT * FROM main_categories ORDER BY id").fetchall()
@@ -345,89 +344,7 @@ async def admin_add_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("قسم رئيسي جديد", callback_data="add_main_cat_start")],
         [InlineKeyboardButton("نوع منتج جديد", callback_data="add_sub_cat_start")],
         [InlineKeyboardButton("حجم/منتج نهائي جديد", callback_data="add_prod_start")],
-        [InlineKeyboardButton("« العودة", callback_data="admin_panel")]
-    ]
-    await update.callback_query.edit_message_text("ماذا تريد أن تضيف؟", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def admin_add_main_cat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text("أرسل اسم القسم الرئيسي الجديد (مثال: المعلبات).")
-    return ADD_MAIN_CAT_NAME
-async def admin_add_main_cat_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_main_cat_name'] = update.message.text
-    await update.message.reply_text("الآن أرسل الإيموجي الخاص بهذا القسم (مثال: 🥫).")
-    return ADD_MAIN_CAT_EMOJI
-async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = context.user_data['new_main_cat_name']
-    emoji = update.message.text
-    try:
-        with db_connect() as conn:
-            conn.execute("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", (name, emoji))
-            conn.commit()
-        await update.message.reply_text(f"✅ تم إضافة القسم الرئيسي '{name}' بنجاح.")
-    except sqlite3.IntegrityError:
-        await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
-    del context.user_data['new_main_cat_name']
-    await start(update, context)
-    return ConversationHandler.END
-
-async def admin_add_sub_cat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db_connect() as conn:
-        cats = conn.execute("SELECT * FROM main_categories").fetchall()
-    keyboard = [[InlineKeyboardButton(c['name'], callback_data=f"maincatid_{c['id']}")] for c in cats]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
-    await update.callback_query.edit_message_text("اختر القسم الرئيسي الذي ينتمي إليه النوع الجديد:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ADD_SUB_CAT_CHOOSE_MAIN
-async def admin_add_sub_cat_choose_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_sub_cat_main_id'] = update.callback_query.data.split("_")[1]
-    await update.callback_query.edit_message_text("أرسل اسم النوع الجديد (مثال: الدقيق الأسمر).")
-    return ADD_SUB_CAT_NAME
-async def admin_add_sub_cat_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_sub_cat_name'] = update.message.text
-    await update.message.reply_text("الآن أرسل رابط الصورة لهذا النوع، أو أرسل 'تخطي' إذا لم تكن هناك صورة.")
-    return ADD_SUB_CAT_IMAGE
-async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    main_id = context.user_data['new_sub_cat_main_id']
-    name = context.user_data['new_sub_cat_name']
-    image_url = update.message.text if update.message.text.lower() != 'تخطي' else None
-    with db_connect() as conn:
-        conn.execute("INSERT INTO sub_categories (main_category_id, name, image_url) VALUES (?, ?, ?)", (main_id, name, image_url))
-        conn.commit()
-    await update.message.reply_text(f"✅ تم إضافة النوع '{name}' بنجاح.")
-    del context.user_data['new_sub_cat_main_id']
-    del context.user_data['new_sub_cat_name']
-    await start(update, context)
-    return ConversationHandler.END
-
-async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db_connect() as conn:
-        sub_cats = conn.execute("SELECT * FROM sub_categories").fetchall()
-    keyboard = [[InlineKeyboardButton(sc['name'], callback_data
-=f"subcatid_{sc['id']}")] for sc in sub_cats]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv")])
-    await update.callback_query.edit_message_text("اختر النوع الذي ينتمي إليه المنتج النهائي:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ADD_PROD_CHOOSE_SUB
-async def admin_add_prod_choose_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_prod_sub_id'] = update.callback_query.data.split("_")[1]
-    await update.callback_query.edit_message_text("أرسل اسم المنتج النهائي (مثال: كيس 50 كيلو).")
-    return ADD_PROD_NAME
-async def admin_add_prod_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_prod_name'] = update.message.text
-    await update.message.reply_text("أرسل سعر المنتج (أرقام فقط).")
-    return ADD_PROD_PRICE
-async def admin_add_prod_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_prod_price'] = update.message.text
-    await update.message.reply_text("أرسل رسوم توصيل المنتج (أرقام فقط).")
-    return ADD_PROD_FEE
-async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sub_id = context.user_data['new_prod_sub_id']
-    name = context.user_data['new_prod_name']
-    price = context.user_data['new_prod_price']
-    fee = update.message.text
-    if not price.isdigit() or not fee.isdigit():
-        await update.message.reply_text("خطأ: السعر ورسوم التوصيل يجب أن تكون أرقامًا. حاول مرة أخرى.")
-        return ConversationHandler.END
-    with db_connect() as conn:
-        conn.execute("INSERT INTO products (sub_category_id, name, price, delivery_fee) VALUES (?, ?, ?, ?)", (sub_id, name, int(price), int(fee)))
+        [InlineKeyboar_fee) VALUES (?, ?, ?, ?)", (sub_id, name, int(price), int(fee)))
         conn.commit()
     await update.message.reply_text(f"✅ تم إضافة المنتج '{name}' بنجاح.")
     del context.user_data['new_prod_sub_id']
@@ -544,14 +461,12 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def parse_text_order(text: str):
     text = text.strip()
     
-    # استخراج الكمية (الرقم الأول في الجملة)
     quantity_match = re.match(r'^\d+', text)
     quantity = 1
     if quantity_match:
         quantity = int(quantity_match.group(0))
         text = text[quantity_match.end():].strip()
 
-    # البحث عن أفضل منتج مطابق
     with db_connect() as conn:
         all_products = conn.execute("""
             SELECT p.id, p.name as prod_name, sc.name as sub_cat_name
@@ -566,7 +481,6 @@ async def parse_text_order(text: str):
         score = 0
         full_name = f"{product['sub_cat_name']} {product['prod_name']}"
         
-        # حساب درجة التطابق
         for word in text.split():
             if word in full_name:
                 score += 1
@@ -584,37 +498,60 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     text = update.message.text
     
-    # --- محاولة فهم الطلب كنص أولاً ---
-    product_id, quantity = await parse_text_order(text)
+    # --- ★★★ التعديل الرئيسي هنا ★★★ ---
+    added_items = []
+    not_found_items = []
     
-    if product_id:
-        cart = get_user_cart(user_id)
-        cart[str(product_id)] = cart.get(str(product_id), 0) + quantity
-        save_user_cart(user_id, cart)
-        
-        item = get_product_details(product_id)
-        full_name = f"{item['sub_cat_name']} {item['name']}"
-        await update.message.reply_text(f"✅ تم إضافة (x{quantity}) من '{full_name}' إلى السلة.")
-        return
+    # تقسيم الرسالة إلى أسطر ومعالجة كل سطر على حدة
+    for line in text.splitlines():
+        if not line.strip():
+            continue
 
-    # --- إذا فشل الفهم، قم بالبحث العادي ---
-    search_term = text.strip().lower()
-    if len(search_term) < 2: return
-    with db_connect() as conn:
-        results = conn.execute("""
-            SELECT p.id, p.name, p.price, sc.name as sub_cat_name
-            FROM products p 
-            JOIN sub_categories sc ON p.sub_category_id = sc.id
-            WHERE p.name LIKE ? OR sc.name LIKE ?
-        """, (f'%{search_term}%', f'%{search_term}%')).fetchall()
+        product_id, quantity = await parse_text_order(line)
         
-    if not results:
-        await update.message.reply_text(f"عذراً، لم أجد منتجات تطابق بحثك عن '{search_term}'.\nيمكنك تجربة التصفح من الأزرار.")
-        return
-        
-    msg = f"🔍 *نتائج البحث عن '{escape_markdown(search_term)}':*"
-    keyboard = [[InlineKeyboardButton(f"➕ {p['sub_cat_name']} {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in results]
-    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
+        if product_id:
+            cart = get_user_cart(user_id)
+            cart[str(product_id)] = cart.get(str(product_id), 0) + quantity
+            save_user_cart(user_id, cart)
+            
+            item = get_product_details(product_id)
+            full_name = f"{item['sub_cat_name']} {item['name']}"
+            added_items.append(f"(x{quantity}) {full_name}")
+        else:
+            not_found_items.append(line)
+
+    # --- بناء رسالة الرد ---
+    response_message = ""
+    if added_items:
+        response_message += "✅ *تمت إضافة المنتجات التالية للسلة:*\n" + "\n".join(f"- {item}" for item in added_items)
+    
+    if not_found_items:
+        if response_message:
+            response_message += "\n\n" # فاصل
+        response_message += "⚠️ *عذراً، لم أتمكن من العثور على المنتجات التالية:*\n" + "\n".join(f"- {item}" for item in not_found_items)
+        response_message += "\n\n_يمكنك تجربة التصفح من الأزرار للعثور عليها\._"
+
+    if not response_message:
+        # إذا لم يتم العثور على أي شيء، قم بالبحث العادي كخيار احتياطي
+        search_term = text.strip().lower()
+        if len(search_term) < 2: return
+        with db_connect() as conn:
+            results = conn.execute("""
+                SELECT p.id, p.name, p.price, sc.name as sub_cat_name
+                FROM products p 
+                JOIN sub_categories sc ON p.sub_category_id = sc.id
+                WHERE p.name LIKE ? OR sc.name LIKE ?
+            """, (f'%{search_term}%', f'%{search_term}%')).fetchall()
+            
+        if not results:
+            await update.message.reply_text(f"عذراً، لم أجد منتجات تطابق بحثك عن '{search_term}'.")
+            return
+            
+        msg = f"🔍 *نتائج البحث عن '{escape_markdown(search_term)}':*"
+        keyboard = [[InlineKeyboardButton(f"➕ {p['sub_cat_name']} {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in results]
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        await update.message.reply_text(response_message, parse_mode=ParseMode.MARKDOWN_V2)
 
 # --- 9. الإعداد والتشغيل ---
 def main() -> None:
@@ -690,3 +627,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
