@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 14.0 (النسخة المستقرة المصححة) ---
+# --- بقالة القرية الذكية - الإصدار 14.1 (النسخة المستقرة المصححة) ---
 import logging
 import os
 import sqlite3
@@ -261,7 +261,7 @@ async def admin_add_main_cat_emoji(update: Update, context: ContextTypes.DEFAULT
     except sqlite3.IntegrityError:
         await update.message.reply_text(f"❌ خطأ: القسم '{name}' موجود بالفعل.")
     del context.user_data['new_main_cat_name']
-    await admin_add_menu(update, context)
+    await admin_panel(update, context) # Changed to show admin panel again
     return ConversationHandler.END
 
 async def admin_add_sub_cat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -289,7 +289,7 @@ async def admin_add_sub_cat_image(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(f"✅ تم إضافة النوع '{name}' بنجاح.")
     del context.user_data['new_sub_cat_main_id']
     del context.user_data['new_sub_cat_name']
-    await admin_add_menu(update, context)
+    await admin_panel(update, context) # Changed to show admin panel again
     return ConversationHandler.END
 
 async def admin_add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +326,7 @@ async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE)
     del context.user_data['new_prod_sub_id']
     del context.user_data['new_prod_name']
     del context.user_data['new_prod_price']
-    await admin_add_menu(update, context)
+    await admin_panel(update, context) # Changed to show admin panel again
     return ConversationHandler.END
 
 # --- 5.2 محادثات تعديل السعر ---
@@ -335,7 +335,7 @@ async def admin_edit_price_start(update: Update, context: ContextTypes.DEFAULT_T
     with db_connect() as conn:
         products = conn.execute("SELECT p.id, p.name, p.price, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id ORDER BY sc.name, p.price").fetchall()
     keyboard = [[InlineKeyboardButton(f"{p['sub_cat_name']} {p['name']} ({int(p['price'])} ريال)", callback_data=f"editprice_{p['id']}")] for p in products]
-    keyboard.append([InlineKeyboardButton("إلغاء", callback_data="admin_panel")])
+    keyboard.append([InlineKeyboardButton("« العودة", callback_data="admin_panel")])
     await update.callback_query.edit_message_text("اختر المنتج الذي تريد تعديل سعره:", reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_PRICE_CHOOSE
 async def admin_edit_price_choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -350,21 +350,7 @@ async def admin_edit_price_choose(update: Update, context: ContextTypes.DEFAULT_
 async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_price_text = update.message.text
     if not new_price_text.isdigit():
-        await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
-        return EDIT_PRICE_SET
-    new_psales = {}
-    for order in orders:
-        cart = json.loads(order['products'])
-        for prod_id, qty in cart.items():
-            if prod_id in product_sales:
-                product_sales[prod_id] += qty
-            else:
-                product_sales[prod_id] = qty
-    
-    sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
-    
-    report_text = f"📊 *{title}*\n"
-    report_text += f"*{'='*20}*\n"
+        await update.mes20}*\n"
     report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
     report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
     report_text += "📈 *المنتجات الأكثر مبيعًا:*\n"
@@ -375,7 +361,7 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
             full_name = f"{details['sub_cat_name']} {details['name']}"
             report_text += f"{i+1}. {full_name} - *(الكمية: {qty})*\n"
             
-    await update.callback_query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.callback_query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
 
 # --- 6. تتبع الطلب للعميل ---
 TRACK_ORDER_ID = range(1)
@@ -387,6 +373,7 @@ async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_
     order_id = update.message.text
     if not order_id.isdigit():
         await update.message.reply_text("رقم الطلب غير صالح. الرجاء إرسال أرقام فقط.")
+        await start(update, context)
         return ConversationHandler.END
 
     with db_connect() as conn:
@@ -400,10 +387,13 @@ async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_
     history = json.loads(order['status_history'])
     status_text = f"🚦 *تتبع حالة الطلب رقم `{order_id}`*\n\n"
     for event in history:
-        date_obj = datetime.fromisoformat(event['date']).strftime('%Y-%m-%d %I:%M %p')
+        try:
+            date_obj = datetime.fromisoformat(event['date']).astimezone(TIMEZONE).strftime('%Y-%m-%d %I:%M %p')
+        except (ValueError, TypeError):
+            date_obj = event['date'] # Fallback for old format
         status_text += f"🔹 *{escape_markdown(event['status'])}* - {escape_markdown(date_obj)}\n"
     
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]]))
     await start(update, context)
     return ConversationHandler.END
 
@@ -491,7 +481,9 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         for item in ambiguous_items:
             await clarify_product_options(update, context, item['term'], item['matches'])
     
-    if not added_items and not ambiguous_items and not_found_items:
+    if added_items or ambiguous_items:
+        await view_cart(update, context)
+    elif not_found_items:
         user = update.effective_user
         forward_message = f"رسالة لم يفهمها البوت من العميل: {user.full_name} (@{user.username or 'لا يوجد'})\n\n---\n{text}\n---"
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forward_message)
@@ -515,6 +507,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         full_name = f"{item['sub_cat_name']} {item['name']}"
         await query.answer(f"✅ تمت إضافة: {full_name}", show_alert=True)
         await query.delete_message()
+        await view_cart(update, context)
         return
 
     if data.startswith("add_"):
@@ -648,11 +641,13 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     query = update.callback_query
     if query:
+        await query.answer()
+        # Check the callback data to decide where to go back to
         if query.data == "admin_panel":
             await admin_panel(update, context)
-        else:
+        else: # Default fallback
             await start(update, context)
-    else:
+    else: # If called from a message handler
         await start(update, context)
     return ConversationHandler.END
 
@@ -667,7 +662,7 @@ def main() -> None:
             ADD_MAIN_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_name)],
             ADD_MAIN_CAT_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_main_cat_emoji)],
         },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
     add_sub_cat_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_sub_cat_start, pattern='^add_sub_cat_start$')],
@@ -676,7 +671,7 @@ def main() -> None:
             ADD_SUB_CAT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_name)],
             ADD_SUB_CAT_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_sub_cat_image)],
         },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
     add_prod_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_prod_start, pattern='^add_prod_start$')],
@@ -686,7 +681,7 @@ def main() -> None:
             ADD_PROD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_price)],
             ADD_PROD_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_prod_fee)],
         },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^admin_panel$')]
     )
     edit_price_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_price_start, pattern='^admin_edit_price_start$')],
@@ -712,7 +707,7 @@ def main() -> None:
         states={
             TRACK_ORDER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, track_order_show_status)]
         },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv$')]
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^main_menu$')]
     )
 
     application.add_handler(CommandHandler("start", start))
