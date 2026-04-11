@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 8.0 (البوت المساعد) ---
+# --- بقالة القرية الذكية - الإصدار 9.0 (البوت الخبير) ---
 import logging
 import os
 import sqlite3
@@ -77,8 +77,9 @@ def get_product_details(prod_id):
         return conn.execute("SELECT p.*, sc.name as sub_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id WHERE p.id = ?", (prod_id,)).fetchone()
 
 def escape_markdown(text: str) -> str:
+    if not isinstance(text, str): text = str(text)
     escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', str(text))
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 def format_invoice(cart: dict) -> tuple[str, int, int]:
     if not cart: return "", 0, 0
@@ -120,7 +121,7 @@ def save_user_cart(user_id: int, cart: dict):
         conn.execute("UPDATE users SET cart = ? WHERE id = ?", (cart_json, user_id))
         conn.commit()
 
-# --- 4. واجهة البوت الرئيسية (تعديل الأزرار) ---
+# --- 4. واجهة البوت الرئيسية (★★★ تم تكبير الأزرار ★★★) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو **اكتب طلبك مباشرة** (مثال: 2 كيس سكر)."
     keyboard = [
@@ -157,11 +158,10 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         item = get_product_details(p_id)
         if item:
             full_name = f"{item['sub_cat_name']} {item['name']}"
-            # ★★★ تعديل الأزرار: كل زر في سطر ★★★
             keyboard_buttons.append([InlineKeyboardButton(f"➕ {full_name[:20]}", callback_data=f"qty_add_{p_id}")])
             keyboard_buttons.append([InlineKeyboardButton(f"➖ {full_name[:20]}", callback_data=f"qty_rem_{p_id}")])
             keyboard_buttons.append([InlineKeyboardButton(f"❌ حذف {full_name[:15]}", callback_data=f"qty_del_{p_id}")])
-            keyboard_buttons.append([InlineKeyboardButton(" ", callback_data="ignore")]) # فاصل مرئي
+            keyboard_buttons.append([InlineKeyboardButton(" ", callback_data="ignore")])
 
     keyboard_buttons.extend([
         [InlineKeyboardButton("✅ إرسال الطلب للمراجعة", callback_data="confirm_order")],
@@ -176,20 +176,30 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except TelegramError as e:
         if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
 
-# --- 5. المعالج الموحد للأزرار (تعديل الأزرار) ---
+# --- 5. المعالج الموحد للأزرار (★★★ تم تكبير الأزرار ★★★) ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
 
-    if data == "ignore": # تجاهل الأزرار الفارغة
+    if data == "ignore": return
+
+    if data.startswith("add_clarify_"):
+        prod_id = data.split("_")[2]
+        cart = get_user_cart(user_id)
+        cart[str(prod_id)] = cart.get(str(prod_id), 0) + 1
+        save_user_cart(user_id, cart)
+        item = get_product_details(prod_id)
+        full_name = f"{item['sub_cat_name']} {item['name']}"
+        await query.answer(f"✅ تمت إضافة '{full_name}'.", show_alert=False)
+        await query.delete_message()
         return
 
     if data.startswith("add_"):
         prod_id = data.split("_")[1]
         cart = get_user_cart(user_id)
-        cart[prod_id] = cart.get(prod_id, 0) + 1
+        cart[str(prod_id)] = cart.get(str(prod_id), 0) + 1
         save_user_cart(user_id, cart)
         item = get_product_details(prod_id)
         full_name = f"{item['sub_cat_name']} {item['name']}"
@@ -207,6 +217,10 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         with db_connect() as conn:
             sub_cats = conn.execute("SELECT * FROM sub_categories WHERE main_category_id = ? ORDER BY id", (main_cat_id,)).fetchall()
         
+        if not sub_cats:
+            await query.answer("لا توجد منتجات في هذا القسم بعد.", show_alert=True)
+            return
+
         if len(sub_cats) == 1:
             await show_products_for_subcategory(query, context, sub_cats[0]['id'])
         else:
@@ -226,7 +240,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         if action == "add": cart[prod_id] = cart.get(prod_id, 0) + 1
         elif action == "rem":
             if prod_id in cart and cart[prod_id] > 1: cart[prod_id] -= 1
-            else: del cart[prod_id]
+            elif prod_id in cart: del cart[prod_id]
         elif action == "del":
             if prod_id in cart: del cart[prod_id]
         save_user_cart(user_id, cart)
@@ -299,7 +313,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data == "admin_add_menu": await admin_add_menu(update, context)
     elif data == "admin_delete_menu": await admin_delete_menu(update, context)
 
-# --- 6. دالة مساعدة لعرض المنتجات (تعديل الأزرار) ---
+# --- 6. دالة مساعدة لعرض المنتجات (★★★ تم تكبير الأزرار ★★★) ---
 async def show_products_for_subcategory(query, context, sub_cat_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE sub_category_id = ? ORDER BY price", (sub_cat_id,)).fetchall()
@@ -319,15 +333,17 @@ async def show_products_for_subcategory(query, context, sub_cat_id):
     
     try:
         if sub_cat['image_url']:
-            await context.bot.send_photo(chat_id=query.effective_chat.id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+            # نحذف الرسالة القديمة ونرسل الصورة مع الأزرار الجديدة
             await query.delete_message()
+            await context.bot.send_photo(chat_id=query.effective_chat.id, photo=sub_cat['image_url'], caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
         else:
+            # في حال عدم وجود صورة، نعدل الرسالة النصية
             await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
-        logger.error(f"Error sending photo for sub_cat {sub_cat_id}: {e}. Sending text message instead.")
+        logger.error(f"Error in show_products_for_subcategory: {e}")
         await query.edit_message_text(caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
 
-# --- 7. لوحة تحكم المدير الكاملة (تعديل الأزرار) ---
+# --- 7. لوحة تحكم المدير الكاملة (★★★ تم تكبير الأزرار ★★★) ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
@@ -342,7 +358,6 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# (بقية دوال المدير هنا... مع تعديل الأزرار)
 # --- 7.1 محادثات الإضافة ---
 ADD_MAIN_CAT_NAME, ADD_MAIN_CAT_EMOJI = range(2)
 ADD_SUB_CAT_CHOOSE_MAIN, ADD_SUB_CAT_NAME, ADD_SUB_CAT_IMAGE = range(3)
@@ -421,8 +436,6 @@ async def admin_add_prod_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data['new_prod_name'] = update.message.text
     await update.message.reply_text("أرسل سعر المنتج (أرقام فقط).")
     return ADD_PROD_PRICE
-async def admin_add_prod_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['new_prod_price'] = update.message.text
     await update.message.reply_text("أرسل رسوم توصيل المنتج (أرقام فقط).")
     return ADD_PROD_FEE
 async def admin_add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -547,19 +560,16 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     return ConversationHandler.END
 
-# --- 8. البحث الذكي والواعي (تحديث كبير) ---
-ORDER_KEYWORDS = ["كيس", "سكر", "دقيق", "رز", "زيت", "حليب", "كيلو", "نص", "قطمة", "جالون", "علبة", "كرتون"]
+# --- 8. البحث الذكي والواعي (★★★ تحديث كبير جداً ★★★) ---
 GREETING_KEYWORDS = ["كيف", "حالك", "السلام", "عليكم", "مرحبا", "بكم", "صباح", "مساء", "بقالة", "اهلًا", "هلا"]
 
-async def parse_text_order(text: str):
-    text = text.strip()
+def find_product_matches(text_line: str):
+    """
+    تبحث هذه الدالة عن أفضل تطابق للمنتجات بناءً على النص المدخل.
+    تعيد قائمة بالمنتجات المرشحة.
+    """
+    words = text_line.split()
     
-    quantity_match = re.match(r'^\d+', text)
-    quantity = 1
-    if quantity_match:
-        quantity = int(quantity_match.group(0))
-        text = text[quantity_match.end():].strip()
-
     with db_connect() as conn:
         all_products = conn.execute("""
             SELECT p.id, p.name as prod_name, sc.name as sub_cat_name
@@ -567,78 +577,107 @@ async def parse_text_order(text: str):
             JOIN sub_categories sc ON p.sub_category_id = sc.id
         """).fetchall()
 
-    best_match = None
-    highest_score = 0
-
+    candidates = []
     for product in all_products:
-        score = 0
         full_name = f"{product['sub_cat_name']} {product['prod_name']}"
-        
-        for word in text.split():
+        score = 0
+        for word in words:
             if word in full_name:
                 score += 1
-        
-        if score > highest_score:
-            highest_score = score
-            best_match = product
-
-    if best_match and highest_score > 0:
-        return best_match['id'], quantity
+        if score > 0:
+            candidates.append({'product': product, 'score': score})
     
-    return None, None
+    # فرز المرشحين حسب النقاط (الأعلى أولاً)
+    return sorted(candidates, key=lambda x: x['score'], reverse=True)
+
+async def clarify_product_options(update: Update, context: ContextTypes.DEFAULT_TYPE, term: str, matches: list):
+    """
+    تعرض خيارات للمستخدم عندما يكون البحث غامضًا.
+    """
+    keyboard = []
+    for match in matches:
+        prod = match['product']
+        full_name = f"{prod['sub_cat_name']} {prod['prod_name']}"
+        keyboard.append([InlineKeyboardButton(f"➕ {full_name}", callback_data=f"add_clarify_{prod['id']}")])
+    
+    await update.message.reply_text(
+        f"وجدت عدة منتجات تطابق '{term}'، أيها تقصد؟",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    text = update.message.text
-    text_lower = text.lower()
-
-    # --- ★★★ المنطق الجديد للوعي بالسياق ★★★ ---
-    is_order_intent = any(keyword in text_lower for keyword in ORDER_KEYWORDS)
-    is_greeting_intent = any(keyword in text_lower for keyword in GREETING_KEYWORDS)
-
-    if is_order_intent:
-        added_items = []
-        not_found_items = []
-        
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-
-            product_id, quantity = await parse_text_order(line)
-            
-            if product_id:
-                cart = get_user_cart(user_id)
-                cart[str(product_id)] = cart.get(str(product_id), 0) + quantity
-                save_user_cart(user_id, cart)
-                
-                item = get_product_details(product_id)
-                full_name = f"{item['sub_cat_name']} {item['name']}"
-                added_items.append(f"(x{quantity}) {full_name}")
-            else:
-                not_found_items.append(line)
-
-        response_message = ""
-        if added_items:
-            response_message += "✅ *تمت إضافة المنتجات التالية للسلة:*\n" + "\n".join(f"- {item}" for item in added_items)
-        
-        if not_found_items:
-            if response_message:
-                response_message += "\n\n"
-            response_message += "⚠️ *عذراً، لم أتمكن من العثور على المنتجات التالية:*\n" + "\n".join(f"- {item}" for item in not_found_items)
-            response_message += "\n\n_يمكنك تجربة التصفح من الأزرار للعثور عليها\._"
-        
-        if response_message:
-            await update.message.reply_text(response_message, parse_mode=ParseMode.MARKDOWN_V2)
-        
-    elif is_greeting_intent:
-        await update.message.reply_text("أهلاً بك! أنا بوت بقالة القرية الذكية. يمكنك تصفح المنتجات من الأزرار أو كتابة طلبك مباشرة.")
+    text = update.message.text.strip()
     
-    else:
-        # ★★★ إعادة توجيه الرسالة للمدير ★★★
+    # التحقق من التحيات أولاً
+    if any(keyword in text.lower() for keyword in GREETING_KEYWORDS):
+        await update.message.reply_text("أهلاً بك! أنا بوت بقالة القرية الذكية. يمكنك تصفح المنتجات من الأزرار أو كتابة طلبك مباشرة.")
+        return
+
+    added_items = []
+    not_found_items = []
+    ambiguous_items = []
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # استخراج الكمية أولاً
+        quantity_match = re.match(r'^\d+', line)
+        quantity = 1
+        search_text = line
+        if quantity_match:
+            quantity = int(quantity_match.group(0))
+            search_text = line[quantity_match.end():].strip()
+
+        matches = find_product_matches(search_text)
+
+        if not matches:
+            not_found_items.append(line)
+            continue
+
+        # إذا كان هناك تطابق ممتاز وواضح (أعلى نتيجة أفضل من الثانية)
+        if len(matches) == 1 or matches[0]['score'] > matches[1]['score']:
+            best_match = matches[0]['product']
+            cart = get_user_cart(user_id)
+            cart[str(best_match['id'])] = cart.get(str(best_match['id']), 0) + quantity
+            save_user_cart(user_id, cart)
+            
+            full_name = f"{best_match['sub_cat_name']} {best_match['prod_name']}"
+            added_items.append(f"(x{quantity}) {full_name}")
+        
+        # إذا كان هناك غموض (أكثر من نتيجة بنفس القوة)
+        else:
+            # جمع كل النتائج المتساوية في القوة
+            top_score = matches[0]['score']
+            ambiguous_matches = [m for m in matches if m['score'] == top_score]
+            ambiguous_items.append({'term': search_text, 'matches': ambiguous_matches})
+
+    # بناء رسالة الرد
+    response_message = ""
+    if added_items:
+        response_message += "✅ *تمت إضافة المنتجات التالية للسلة:*\n" + "\n".join(f"- {item}" for item in added_items)
+    
+    if not_found_items:
+        if response_message: response_message += "\n\n"
+        response_message += "⚠️ *عذراً، لم أتمكن من العثور على:*\n" + "\n".join(f"- {item}" for item in not_found_items)
+
+    if response_message:
+        await update.message.reply_text(response_message, parse_mode=ParseMode.MARKDOWN_V2)
+
+    # التعامل مع الطلبات الغامضة (بعد إرسال الرد الأول)
+    if ambiguous_items:
+        for item in ambiguous_items:
+            await clarify_product_options(update, context, item['term'], item['matches'])
+    
+    # إذا لم يتم العثور على أي شيء على الإطلاق، أرسل الرسالة للمدير
+    if not added_items and not ambiguous_items and not_found_items:
         user = update.effective_user
         forward_message = f"رسالة لم يفهمها البوت من العميل: {user.full_name} (@{user.username or 'لا يوجد'})\n\n---\n{text}\n---"
         await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forward_message)
         await update.message.reply_text("شكراً لك، تم إرسال رسالتك إلى الإدارة للمراجعة والرد عليك في أقرب وقت.")
+
 
 # --- 9. الإعداد والتشغيل ---
 def main() -> None:
