@@ -352,52 +352,20 @@ async def admin_edit_price_set(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("خطأ: الرجاء إرسال أرقام فقط. حاول مرة أخرى.")
         return EDIT_PRICE_SET
     
-    new_pras conn:
-        orders = conn.execute("SELECT * FROM orders WHERE status = 'تم التسليم' AND order_date >= ?", (start_date_str,)).fetchall()
+    # هذا هو الجزء الذي تم تصحيحه بالكامل
+    new_price = int(new_price_text)
+    prod_id = context.user_data.get('product_to_edit')
+    with db_connect() as conn:
+        conn.execute("UPDATE products SET price = ? WHERE id = ?", (new_price, prod_id))
+        conn.commit()
+    item = get_product_details(prod_id)
+    full_name = f"{item['sub_cat_name']} {item['name']}"
+    msg = f"✅ تم تحديث سعر *{escape_markdown(full_name)}* إلى *{new_price}* ريال بنجاح."
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    del context.user_data['product_to_edit']
+    await admin_panel(update, context)
+    return ConversationHandler.END
 
-    if not orders:
-        await query.edit_message_text(f"لا توجد مبيعات مكتملة في الفترة المحددة.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
-        return
-
-    total_sales = sum(o['total_price'] for o in orders)
-    num_orders = len(orders)
-    product_sales = {}
-    for order in orders:
-        cart = json.loads(order['products'])
-        for prod_id, qty in cart.items():
-            if prod_id in product_sales:
-                product_sales[prod_id] += qty
-            else:
-                product_sales[prod_id] = qty
-    
-    sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
-    
-    report_text = f"📊 *{title}*\n"
-    report_text += f"*{'='*20}*\n"
-    report_text += f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n"
-    report_text += f"📦 *عدد الطلبات:* {num_orders}\n\n"
-    report_text += "📈 *المنتجات الأكثر مبيعًا:*\n"
-    
-    for i, (prod_id, qty) in enumerate(sorted_products[:5]):
-        details = get_product_details(prod_id)
-        if details:
-            full_name = f"{details['sub_cat_name']} {details['name']}"
-            report_text += f"{i+1}. {full_name} - *(الكمية: {qty})*\n"
-            
-    await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
-
-# --- 6. تتبع الطلب للعميل ---
-TRACK_ORDER_ID = range(1)
-async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
-    return TRACK_ORDER_ID
-
-async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    order_id = update.message.text
-    if not order_id.isdigit():
-        await update.message.reply_text("رقم الطلب غير صالح. الرجاء إرسال أرقام فقط.")
-        await start(update, context)
-        return ConversationHandler.END
 
     with db_connect() as conn:
         order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
