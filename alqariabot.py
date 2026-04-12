@@ -50,7 +50,7 @@ def setup_database():
             cursor.execute("SELECT COUNT(*) FROM main_categories")
             if cursor.fetchone()[0] == 0:
                 logger.info("Populating database with initial data...")
-                main_cats = [('الدقيق', '🍚'), ('السكر', '🍚'), ('الأرز', '🍛'), ('البقوليات', '🫘'), ('الزيوت والسمن', '🧈'), ('الحليب', '🥛')]
+                main_cats = [('قسم الدقيق', '🍚'), ('قسم السكر', '🍚'), ('قسم الارز', '🍛'), ('قسم البقوليات', '🫘'), ('قسم الزيت و السمن', '🧈'), (' قسم الحليب البودره ', '🥛')]
                 cursor.executemany("INSERT INTO main_categories (name, emoji) VALUES (?, ?)", main_cats)
                 sub_cats = [
                     (1, 'الدقيق الأبيض', None), (1, 'الدقيق الأسمر', None),
@@ -61,16 +61,7 @@ def setup_database():
                     (6, 'حليب البودرة', None)
                 ]
                 cursor.executemany("INSERT INTO sub_categories (main_category_id, name, image_url) VALUES (?, ?, ?)", sub_cats)
-                products = [
-    (1, 'كيس (50 كيلو)', 12700, 1000), (1, 'نص كيس (25 كيلو)', 6350, 500),
-    (2, 'كيس (45 كيلو)', 12000, 1000), (2, 'نص كيس (22.5 كيلو)', 6000, 500),
-    (3, 'كيس (10 كيلو)', 19000, 1000), (3, 'نص كيس (5 كيلو)', 9500, 500),
-    (4, 'كيس (10 كيلو)', 7400, 300), (4, 'كيس (5 كيلو)', 3800, 200),
-    (5, 'جالون (4 لتر)', 3750, 200),
-    (6, 'كيس (25 كيلو)', 50000, 500), 
-    (6, 'نص كيس (12.5 كيلو)', 25000, 250),  # <-- تم تصحيح هذا السطر
-    (6, 'ربع كيس (6.25 كيلو)', 12500, 200)
-]
+                
 
                 cursor.executemany("INSERT INTO products (sub_category_id, name, price, delivery_fee) VALUES (?, ?, ?, ?)", products)
             conn.commit()
@@ -84,7 +75,19 @@ def get_product_details(prod_id):
         return conn.execute("SELECT p.*, sc.name as sub_cat_name, mc.name as main_cat_name FROM products p JOIN sub_categories sc ON p.sub_category_id = sc.id JOIN main_categories mc ON sc.main_category_id = mc.id WHERE p.id = ?", (prod_id,)).fetchone()
 
 def escape_markdown(text: str) -> str:
-    if not isinstance(text, str): text = str(text)
+    iproducts = [
+    (1, 'كيس (50 كيلو)', 12700, 1000), (1, 'نص كيس (25 كيلو)', 6350, 500),
+    (2, 'كيس (45 كيلو)', 12000, 1000), (2, 'نص كيس (22.5 كيلو)', 6000, 500),
+    (3, 'كيس (10 كيلو)', 19000, 1000), (3, 'نص كيس (5 كيلو)', 9500, 500),
+    (4, 'كيس (10 كيلو)', 7400, 300), (4, 'كيس (5 كيلو)', 3800, 200),
+    (5, 'جالون (4 لتر)', 3750, 200),
+    # --- منتجات حليب البودرة ---
+    (6, 'كيس (25 كيلو)', 50000, 500), 
+    (6, 'نص كيس (12.5 كيلو)', 25000, 250),
+    (6, 'ربع كيس (6.25 كيلو)', 12500, 200),
+    (6, '1 كيلو', 1900, 50)  # <-- تم نقل هذا السطر إلى الأخير
+]
+f not isinstance(text, str): text = str(text)
     escape_chars = r'_*[]()~`>#+-=|{}.!'
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
