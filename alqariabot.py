@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 16.0 (هيكل بيانات جديد) ---
+# --- بقالة القرية الذكية - الإصدار 16.1 (مراجعة كاملة وتصحيح) ---
 import logging
 import os
 import sqlite3
@@ -178,8 +178,6 @@ async def show_products_for_brand(query, context, brand_id):
     await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
 
 # --- 5. دوال لوحة تحكم المدير (محدثة بالكامل) ---
-# ... (بقية الدوال مثل admin_panel, المحادثات, search_handler, unified_button_handler, main)
-# ... سيتم وضع الكود المتبقي هنا
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     with db_connect() as conn:
@@ -193,6 +191,19 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]
     ]
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def admin_panel_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with db_connect() as conn:
+        total_sales = conn.execute("SELECT SUM(total_price) FROM orders WHERE status = 'تم التسليم'").fetchone()[0] or 0
+        pending_orders = conn.execute("SELECT COUNT(*) FROM orders WHERE status = 'قيد المراجعة'").fetchone()[0]
+    msg = f"👑 *لوحة تحكم المدير*\n\n💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n⏳ *طلبات جديدة:* {pending_orders}\n\nاختر الإجراء:"
+    keyboard = [
+        [InlineKeyboardButton("➕ إدارة الإضافة", callback_data="admin_add_menu")],
+        [InlineKeyboardButton("✏️ تعديل/حذف", callback_data="admin_edit_delete_menu")],
+        [InlineKeyboardButton("📊 تقارير المبيعات", callback_data="admin_reports_menu")],
+        [InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]
+    ]
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # --- 5.1 محادثات الإضافة ---
 ADD_DEPT_NAME, ADD_DEPT_EMOJI = range(2)
@@ -208,7 +219,6 @@ async def admin_add_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.callback_query.edit_message_text("ماذا تريد أن تضيف؟", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# إضافة قسم
 async def add_dept_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text("أرسل اسم القسم الجديد (مثال: قسم المعجنات).")
     return ADD_DEPT_NAME
@@ -229,7 +239,6 @@ async def add_dept_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await admin_panel_from_message(update, context)
     return ConversationHandler.END
 
-# إضافة صنف/علامة تجارية
 async def add_brand_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn: depts = conn.execute("SELECT * FROM departments").fetchall()
     keyboard = [[InlineKeyboardButton(d['name'], callback_data=f"addbrand_dept_{d['id']}")] for d in depts]
@@ -255,21 +264,13 @@ async def add_brand_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await admin_panel_from_message(update, context)
     return ConversationHandler.END
 
-# إضافة منتج/حجم
 async def add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with db_connect() as conn: 
-        # --- هذا هو الاستعلام الذي تم تصحيحه ---
         brands = conn.execute("SELECT b.id, b.name, d.name as dept_name FROM brands b JOIN departments d ON b.department_id = d.id ORDER BY d.name, b.name").fetchall()
-    
-    # بناء الأزرار
     keyboard = [[InlineKeyboardButton(f"{b['dept_name']} -> {b['name']}", callback_data=f"addprod_brand_{b['id']}")] for b in brands]
     keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv_admin")])
-    
-    # إرسال الرسالة
     await update.callback_query.edit_message_text("اختر الصنف الذي ينتمي إليه المنتج:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
     return ADD_PROD_CHOOSE_BRAND
-
 async def add_prod_choose_brand(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['new_prod_brand_id'] = update.callback_query.data.split("_")[2]
     await update.callback_query.edit_message_text("أرسل اسم المنتج/الحجم (مثال: كيس 10 كيلو).")
@@ -296,7 +297,7 @@ async def add_prod_fee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # --- 5.2 محادثات التعديل والحذف ---
-EDIT_DELETE_CHOOSE_TYPE, EDIT_DELETE_CHOOSE_ITEM, EDIT_PRICE_SET = range(3)
+EDIT_DELETE_CHOOSE_ITEM, EDIT_PRICE_SET = range(2)
 
 async def admin_edit_delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -316,97 +317,7 @@ async def choose_item_to_edit_or_delete(update: Update, context: ContextTypes.DE
     items, message_text = [], ""
     with db_connect() as conn:
         if item_type == "price":
-            items = conn.execute("SELECT p.id, p.name, p.price, b.name as brand_name FROM products p JOIN brands b ON p.brand_id = b.id ORDER BY b.name, p.price").fetchall()
-            message_text = "اختر المنتج لتعديل سعره:"
-        elif item_type == "dept":
-            items = conn.execute("SELECT id, name FROM departments").fetchall()
-            message_text = "اختر القسم للحذف (سيحذف كل أصنافه ومنتجاته):"
-        elif item_type == "brand":
-            items = conn.execute("SELECT b.id, b.name, d.name as dept_name FROM brands b JOIN departments d ON b.department_id = d.id ORDER BY d.name").fetchall()
-            message_text = "اختر الصنف للحذف (سيحذف كل منتجاته):"
-        elif item_type == "prod":
-            items = conn.execute("SELECT p.id, p.name, b.name as brand_name FROM products p JOIN brands b ON p.brand_id = b.id ORDER BY b: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_name)], ADD_PROD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_price)], ADD_PROD_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_fee)]}, fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')])
-
-    # محادثة التعديل والحذف الموحدة
-    edit_delete_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^edit_type_price$'),
-            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_dept$'),
-            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_brand$'),
-            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_prod$'),
-        ],
-        states={
-            EDIT_DELETE_CHOOSE_ITEM: [CallbackQueryHandler(process_item_selection, pattern='^selectitem_')],
-            EDIT_PRICE_SET: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_new_price)],
-        },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')]
-    )
-    
-    # محادثة تتبع الطلب
-    track_order_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(track_order_start, pattern='^track_order_start$')],
-        states={
-            TRACK_ORDER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, track_order_show_status)]
-        },
-        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^main_menu$')]
-    )
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(add_dept_conv)
-    application.add_handler(add_brand_conv)
-    application.add_handler(add_prod_conv)
-    application.add_handler(edit_delete_conv)
-    application.add_handler(track_order_conv)
-    application.add_handler(CallbackQueryHandler(unified_button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
-
-    logger.info("Starting bot with webhook...")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TOKEN,
-        webhook_url=f"{WEB_URL}/{TOKEN}"
-    )
-
-# --- 6. تقارير المبيعات وبقية الدوال ---
-async def admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("تقرير اليوم", callback_data="gen_report_today")],
-        [InlineKeyboardButton("تقرير الأمس", callback_data="gen_report_yesterday")],
-        [InlineKeyboardButton("تقرير هذا الأسبوع", callback_data="gen_report_week")],
-        [InlineKeyboardButton("« العودة", callback_data="admin_panel")]
-    ]
-    await update.callback_query.edit_message_text("اختر فترة التقرير:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    period = query.data.split("_")[2]
-    now = datetime.now(TIMEZONE)
-    
-    if period == "today":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        title = "تقرير اليوم"
-    elif period == "yesterday":
-        yesterday = now - timedelta(days=1)
-        start_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-        title = "تقرير الأمس"
-    else: # week
-        start_date = now - timedelta(days=now.weekday())
-        start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        title = "تقرير هذا الأسبوع"
-    
-    with db_connect() as conn:
-        orders = conn.execute("SELECT * FROM orders WHERE status = 'تم التسليم' AND order_date >= ?", (start_date.isoformat(),)).fetchall()
-
-    if not orders:
-        await query.edit_message_text(f"لا توجد مبيعات مكتملة في الفترة المحددة.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
-        return
-
-    total_sales = sum(o['total_price'] for o in orders)
-    num_orders = len(orders)
-    product_sales = {}
-    for order in orders:
-        for prod_id, qty in json.loads(order['products']).items():
+            items = conn.execute("SELECT p.id, p.name, p.price, json.loads(order['products']).items():
             product_sales[str(prod_id)] = product_sales.get(str(prod_id), 0) + qty
     
     sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
@@ -420,7 +331,6 @@ async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
 
-# --- 7. تتبع الطلب والبحث الذكي ---
 TRACK_ORDER_ID = range(1)
 async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
@@ -448,15 +358,13 @@ async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_
     await start(update, context)
     return ConversationHandler.END
 
+# --- 7. البحث والمعالج الموحد للأزرار ---
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # هذه الدالة تحتاج إلى إعادة بناء لتكون أكثر ذكاءً مع الهيكل الجديد
-    # حاليًا، ستقوم بالرد بشكل عام وتوجيه الرسالة للمدير
     user = update.effective_user
     forward_message = f"رسالة لم يفهمها البوت من العميل: {user.full_name} (@{user.username or 'لا يوجد'})\n\n---\n{update.message.text}\n---"
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forward_message)
     await update.message.reply_text("شكراً لك، تم استلام طلبك. يمكنك استخدام أزرار تصفح المنتجات للوصول لطلبك بشكل أسرع. سيقوم أحد موظفينا بمراجعة رسالتك والرد عليك.")
 
-# --- 8. المعالج الموحد للأزرار ---
 async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -559,7 +467,7 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif data == "admin_reports_menu": await admin_reports_menu(update, context)
     elif data.startswith("gen_report_"): await generate_report(update, context)
 
-# --- دالة الإلغاء العامة ---
+# --- 8. دالة الإلغاء العامة والإعداد والتشغيل ---
 async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key in list(context.user_data.keys()):
         if key.startswith('new_') or key.startswith('admin_action') or key.startswith('product_to_edit'):
@@ -576,5 +484,49 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     return ConversationHandler.END
 
+def main() -> None:
+    setup_database()
+    application = Application.builder().token(TOKEN).build()
+    
+    add_dept_conv = ConversationHandler(entry_points=[CallbackQueryHandler(add_dept_start, pattern='^add_dept_start$')], states={ADD_DEPT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dept_name)], ADD_DEPT_EMOJI: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dept_emoji)]}, fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')])
+    add_brand_conv = ConversationHandler(entry_points=[CallbackQueryHandler(add_brand_start, pattern='^add_brand_start$')], states={ADD_BRAND_CHOOSE_DEPT: [CallbackQueryHandler(add_brand_choose_dept, pattern='^addbrand_dept_')], ADD_BRAND_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_brand_name)], ADD_BRAND_IMAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_brand_image)]}, fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')])
+    add_prod_conv = ConversationHandler(entry_points=[CallbackQueryHandler(add_prod_start, pattern='^add_prod_start$')], states={ADD_PROD_CHOOSE_BRAND: [CallbackQueryHandler(add_prod_choose_brand, pattern='^addprod_brand_')], ADD_PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_name)], ADD_PROD_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_price)], ADD_PROD_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_prod_fee)]}, fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')])
+    edit_delete_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^edit_type_price$'),
+            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_dept$'),
+            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_brand$'),
+            CallbackQueryHandler(choose_item_to_edit_or_delete, pattern='^delete_type_prod$'),
+        ],
+        states={
+            EDIT_DELETE_CHOOSE_ITEM: [CallbackQueryHandler(process_item_selection, pattern='^selectitem_')],
+            EDIT_PRICE_SET: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_new_price)],
+        },
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^cancel_conv_admin$')]
+    )
+    track_order_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(track_order_start, pattern='^track_order_start$')],
+        states={TRACK_ORDER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, track_order_show_status)]},
+        fallbacks=[CallbackQueryHandler(cancel_conv, pattern='^main_menu$')]
+    )
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(add_dept_conv)
+    application.add_handler(add_brand_conv)
+    application.add_handler(add_prod_conv)
+    application.add_handler(edit_delete_conv)
+    application.add_handler(track_order_conv)
+    application.add_handler(CallbackQueryHandler(unified_button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+
+    logger.info("Starting bot with webhook...")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"{WEB_URL}/{TOKEN}"
+    )
+
 if __name__ == "__main__":
     main()
+    
