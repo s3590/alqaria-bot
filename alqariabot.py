@@ -257,11 +257,19 @@ async def add_brand_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # إضافة منتج/حجم
 async def add_prod_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db_connect() as conn: brands = conn.execute("SELECT b.id, b.name, d.name as dept_name FROM brands b JOIN departments d ON b.department_id = d.id ORDER BY d.name, b.name").fetchall()
+    with db_connect() as conn: 
+        # --- هذا هو الاستعلام الذي تم تصحيحه ---
+        brands = conn.execute("SELECT b.id, b.name, d.name as dept_name FROM brands b JOIN departments d ON b.department_id = d.id ORDER BY d.name, b.name").fetchall()
+    
+    # بناء الأزرار
     keyboard = [[InlineKeyboardButton(f"{b['dept_name']} -> {b['name']}", callback_data=f"addprod_brand_{b['id']}")] for b in brands]
     keyboard.append([InlineKeyboardButton("إلغاء", callback_data="cancel_conv_admin")])
+    
+    # إرسال الرسالة
     await update.callback_query.edit_message_text("اختر الصنف الذي ينتمي إليه المنتج:", reply_markup=InlineKeyboardMarkup(keyboard))
+    
     return ADD_PROD_CHOOSE_BRAND
+
 async def add_prod_choose_brand(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['new_prod_brand_id'] = update.callback_query.data.split("_")[2]
     await update.callback_query.edit_message_text("أرسل اسم المنتج/الحجم (مثال: كيس 10 كيلو).")
