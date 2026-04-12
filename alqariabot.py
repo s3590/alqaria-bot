@@ -420,6 +420,217 @@ async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         await show_brands_for_department(query, context, data.split("_")[1])
 
     elif data.startswith("brand_"):
+# --- 5.2 محادثات التعديل والحذف ---
+EDIT_DELETE_CHOOSE_ITEM, EDIT_PRICE_SET = range(2)
+
+async def admin_edit_delete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("تعديل سعر منتج", callback_data="edit_type_price")],
+        [InlineKeyboardButton("حذف قسم", callback_data="delete_type_dept")],
+        [InlineKeyboardButton("حذف صنف", callback_data="delete_type_brand")],
+        [InlineKeyboardButton("حذف منتج", callback_data="delete_type_prod")],
+        [InlineKeyboardButton("« العودة", callback_data="admin_panel")]
+    ]
+    await update.callback_query.edit_message_text("اختر الإجراء:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def choose_item_to_edit_or_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    action, item_type = query.data.split("_")[0], query.data.split("_")[2]
+    context.user_data['admin_action'] = {'action': action, 'type': item_type}
+    
+    items, message_text = [], ""
+    with db_connect() as conn:
+        if item_type == "price":
+            items = conn.execute("SELECT p.id, p.name, p.price, b.name as brand_name FROM products p JOIN brands b ON p.brand_id = b.id ORDER BY b.name, p.price").fetchall()
+            message_text = "اختر المنتج لتعديل سعره:"
+        elif item_type == "dept":
+            items = conn.execute("SELECT id, name FROM departments ORDER BY name").fetchall()
+            message_text = "اختر القسم للحذف (سيحذف كل أصنافه ومنتجاته):"
+        elif item_type == "brand":
+            items = conn.execute("SELECT b.id, b.name, d.name as dept_name FROM brands b JOIN departments d ON b.department_id = d.id ORDER BY d.name, b.name").fetchall()
+            message_text = "اختر الصنف للحذف (سيحذف كل منتجاته):"
+        elif item_type == "prod":
+            items = conn.execute("SELECT p.id, p.name, b.name as brand_name FROM products p JOIN brands b ON p.brand_id = b.id ORDER BY b.name, p.name").fetchall()
+            message_text = "اختر المنتج للحذف:"
+
+    if not items:
+        await query.edit_message_text("لا توجد عناصر.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_edit_delete_menu")]]))
+        return ConversationHandler.END
+
+    keyboard = []
+    for item in items:
+        if item_type == 'price': 
+            label = f"{item['brand_name']} - {item['name']} ({int(item['price'])} ريال)"
+        elif item_type == 'dept': 
+            label = item['name']
+        elif item_type == 'brand': 
+            label = f"{item['dept_name']} -> {item['name']}"
+        else: # prod
+            label = f"{item['brand_name']} -> {item['name']}"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"selectitem_{item['id']}")])
+    
+    keyboard.append([InlineKeyboardButton("« إلغاء", callback_data="cancel_conv_admin")])
+    await query.edit_message_text(message_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    return EDIT_DELETE_CHOOSE_ITEM
+
+
+async def process_item_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    item_id = query.data.split("_")[1]
+    action_data = context.user_data['admin_action']
+    action, item_type = action_data['action'], action_data['type']
+
+    if action == 'edit':
+        context.user_data['product_to_edit'] = item_id
+        item = get_product_details(item_id)
+        msg = f"السعر الحالي لـ *{escape_markdown(item['brand_name'])} - {escape_markdown(item['name'])}* هو {int(item['price'])} ريال. \n\nأرسل السعر الجديد."
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+        return EDIT_PRICE_SET
+    
+    elif action == 'delete':
+        table_map = {"dept": "departments", "brand": "brands", "prod": "products"}
+        with db_connect() as conn:
+            conn.execute(f"DELETE FROM {table_map[item_type]} WHERE id = ?", (item_id,))
+            conn.commit()
+        await query.edit_message_text("✅ تم الحذف بنجاح.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_edit_delete_menu")]]))
+        del context.user_data['admin_action']
+        return ConversationHandler.END
+
+
+async def set_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_price_text = update.message.text
+    prod_id = context.user_data.get('product_to_edit')
+    if not new_price_text.isdigit():
+        await update.message.reply_text("❌ خطأ: السعر يجب أن يكون أرقامًا. أرسل السعر الجديد مرة أخرى.")
+        return EDIT_PRICE_SET
+    try:
+        with db_connect() as conn:
+            conn.execute("UPDATE products SET price = ? WHERE id = ?", (int(new_price_text), prod_id))
+            conn.commit()
+        item = get_product_details(prod_id)
+        await update.message.reply_text(f"✅ تم تحديث سعر المنتج '{item['brand_name']} - {item['name']}' إلى *{new_price_text} ريال* بنجاح.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Failed to update price for product {prod_id}: {e}")
+        await update.message.reply_text("حدث خطأ أثناء تحديث السعر.")
+    
+    if 'product_to_edit' in context.user_data: del context.user_data['product_to_edit']
+    if 'admin_action' in context.user_data: del context.user_data['admin_action']
+    
+    await admin_panel_from_message(update, context)
+    return ConversationHandler.END
+
+# --- 6. تقارير المبيعات وتتبع الطلب ---
+async def admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("تقرير اليوم", callback_data="gen_report_today")],
+        [InlineKeyboardButton("تقرير الأمس", callback_data="gen_report_yesterday")],
+        [InlineKeyboardButton("تقرير هذا الأسبوع", callback_data="gen_report_week")],
+        [InlineKeyboardButton("« العودة", callback_data="admin_panel")]
+    ]
+    await update.callback_query.edit_message_text("اختر فترة التقرير:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    period = query.data.split("_")[2]
+    now = datetime.now(TIMEZONE)
+    
+    if period == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        title = "تقرير اليوم"
+    elif period == "yesterday":
+        yesterday = now - timedelta(days=1)
+        start_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        title = "تقرير الأمس"
+    else: # week
+        start_date = now - timedelta(days=now.weekday())
+        start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        title = "تقرير هذا الأسبوع"
+    
+    with db_connect() as conn:
+        orders = conn.execute("SELECT * FROM orders WHERE status = 'تم التسليم' AND order_date >= ?", (start_date.isoformat(),)).fetchall()
+
+    if not orders:
+        await query.edit_message_text(f"لا توجد مبيعات مكتملة في الفترة المحددة.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+        return
+
+    total_sales = sum(o['total_price'] for o in orders)
+    num_orders = len(orders)
+    product_sales = {}
+    for order in orders:
+        for prod_id, qty in json.loads(order['products']).items():
+            product_sales[str(prod_id)] = product_sales.get(str(prod_id), 0) + qty
+    
+    sorted_products = sorted(product_sales.items(), key=lambda item: item[1], reverse=True)
+    
+    report_text = f"📊 *{title}*\n" + f"*{'='*20}*\n" + f"💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n" + f"📦 *عدد الطلبات:* {num_orders}\n\n" + "📈 *المنتجات الأكثر مبيعًا:*\n"
+    
+    for i, (prod_id, qty) in enumerate(sorted_products[:5]):
+        details = get_product_details(prod_id)
+        if details:
+            report_text += f"{i+1}. {escape_markdown(details['brand_name'])} - {escape_markdown(details['name'])} *(الكمية: {qty})*\n"
+            
+    await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
+
+TRACK_ORDER_ID = range(1)
+async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
+    return TRACK_ORDER_ID
+
+async def track_order_show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    order_id = update.message.text
+    if not order_id.isdigit():
+        await update.message.reply_text("رقم الطلب غير صالح. أرسل أرقامًا فقط.")
+        return ConversationHandler.END
+
+    with db_connect() as conn:
+        order = conn.execute("SELECT * FROM orders WHERE id = ? AND user_id = ?", (order_id, update.effective_user.id)).fetchone()
+
+    if not order:
+        await update.message.reply_text(f"عذراً، لم يتم العثور على طلب بهذا الرقم `{order_id}` يخصك.", parse_mode=ParseMode.MARKDOWN)
+    else:
+        history = json.loads(order['status_history'])
+        status_text = f"🚦 *تتبع حالة الطلب رقم `{order_id}`*\n\n"
+        for event in history:
+            date_obj = datetime.fromisoformat(event['date']).astimezone(TIMEZONE).strftime('%Y-%m-%d %I:%M %p')
+            status_text += f"🔹 *{escape_markdown(event['status'])}* - {escape_markdown(date_obj)}\n"
+        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN_V2)
+    
+    await start(update, context)
+    return ConversationHandler.END
+
+# --- 7. البحث والمعالج الموحد للأزرار ---
+async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    forward_message = f"رسالة لم يفهمها البوت من العميل: {user.full_name} (@{user.username or 'لا يوجد'})\n\n---\n{update.message.text}\n---"
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forward_message)
+    await update.message.reply_text("شكراً لك، تم استلام طلبك. يمكنك استخدام أزرار تصفح المنتجات للوصول لطلبك بشكل أسرع. سيقوم أحد موظفينا بمراجعة رسالتك والرد عليك.")
+
+async def unified_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = update.effective_user.id
+
+    if data.startswith("add_"):
+        prod_id = data.split("_")[1]
+        cart = get_user_cart(user_id)
+        cart[str(prod_id)] = cart.get(str(prod_id), 0) + 1
+        save_user_cart(user_id, cart)
+        item = get_product_details(prod_id)
+        await query.answer(f"✅ تمت إضافة: {item['brand_name']} - {item['name']}", show_alert=True)
+        return
+
+    elif data == "browse_departments":
+        with db_connect() as conn: depts = conn.execute("SELECT * FROM departments ORDER BY id").fetchall()
+        keyboard = [[InlineKeyboardButton(f"{d['emoji']} {d['name']}", callback_data=f"department_{d['id']}")] for d in depts]
+        keyboard.append([InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")])
+        await query.edit_message_text("اختر القسم الرئيسي:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("department_"):
+        await show_brands_for_department(query, context, data.split("_")[1])
+
+    elif data.startswith("brand_"):
         await show_products_for_brand(query, context, data.split("_")[1])
 
     elif data == "main_menu": await start(update, context)
@@ -561,4 +772,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
     
