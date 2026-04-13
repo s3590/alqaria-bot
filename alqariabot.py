@@ -1,4 +1,4 @@
-# --- بقالة القرية الذكية - الإصدار 15.1 (النسخة النهائية والمختبرة والمصححة) ---
+# --- بقالة القرية الذكية - الإصدار 16.0 (النسخة النهائية والمصححة) ---
 import logging
 import os
 import sqlite3
@@ -317,20 +317,7 @@ async def choose_item_to_edit_or_delete(update: Update, context: ContextTypes.DE
     items, message_text = [], ""
     with db_connect() as conn:
         if item_type == "price":
-            items = conn.execute("SELECT p.id, p, context)
-    return ConversationHandler.END
-
-# --- 6. تقارير المبيعات وتتبع الطلب ---
-async def admin_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("تقرير اليوم", callback_data="gen_report_today")],
-        [InlineKeyboardButton("تقرير الأمس", callback_data="gen_report_yesterday")],
-        [InlineKeyboardButton("تقرير هذا الأسبوع", callback_data="gen_report_week")],
-        [InlineKeyboardButton("« العودة", callback_data="admin_panel")]
-    ]
-    await update.callback_query.edit_message_text("اختر فترة التقرير:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            items = conn.execute("SELECT p.id, p.name, p.pasync def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     period = query.data.split("_")[2]
     now = datetime.now(TIMEZONE)
@@ -372,6 +359,7 @@ async def generate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     await query.edit_message_text(report_text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« العودة", callback_data="admin_reports_menu")]]))
 
+# --- 6. تتبع الطلب للعميل ---
 TRACK_ORDER_ID = range(1)
 async def track_order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text("الرجاء إرسال رقم الطلب الذي تريد تتبعه.")
