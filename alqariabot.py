@@ -176,68 +176,87 @@ async def show_products_for_brand(query, context, brand_id):
         return
     keyboard = [[InlineKeyboardButton(f"➕ {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in products]
     keyboard.append([InlineKeyboardButton("« العودة للأصناف", callback_data=f"department_{brand['department_id']}")])
-    await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard),
-# --- 5. دوال لوحة تحكم المدير (محدثة بالكامل) ---
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def add_product_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    product_id = int(query.data.split("_")[1])
+    cart = get_user_cart(update.effective_user.id)
+    
+    # زيادة كمية المنتج في السلة
+    if product_id in cart:
+        cart[product_id] += 1
+    else:
+        cart[product_id] = 1
+    
+    save_user_cart(update.effective_user.id, cart)
+    
+    await query.answer("تم إضافة المنتج إلى السلة!", show_alert=True)
+
+async def clear_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cart = {}
+    save_user_cart(update.effective_user.id, cart)
+    await update.callback_query.answer("تم تفريغ السلة!", show_alert=True)
+
+async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    cart = get_user_cart(update.effective_user.id)
+    
+    if not cart:
+        await query.answer("سلتك فارغة، لا يمكنك إرسال طلب.", show_alert=True)
+        return
+    
+    invoice_text, total_price, _ = format_invoice(cart)
+    user_name = update.effective_user.full_name
+    
+    # حفظ الطلب في قاعدة البيانات
     with db_connect() as conn:
-        total_sales = conn.execute("SELECT SUM(total_price) FROM orders WHERE status = 'تم التسليم'").fetchone()[0] or 0
-        pending_orders = conn.execute("SELECT COUNT(*) FROM orders WHERE status = 'قيد المراجعة'").fetchone()[0]
-    msg = f"👑 *لوحة تحكم المدير*\n\n💰 *إجمالي المبيعات:* {int(total_sales)} ريال\n⏳ *طلبات جديدة:* {pending_orders}\n\nاختر الإجراء:"
-    keyboard = [
-        [InlineKeyboardButton("➕ إدارة الإضافة", callback_data="admin_add_menu")],
-        [InlineKeyboardButton("✏️ تعديل/حذف", callback_data="admin_edit_delete_menu")],
-        [InlineKeyboardButton("📊 تقارير المبيعات", callback_data="admin_reports_menu")],
-        [InlineKeyboardButton("« العودة للقائمة الرئيسية", callback_data="main_menu")]
-    ]
-    await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO orders (user_id, user_name, products, total_price, order_date) VALUES (?, ?, ?, ?, ?)", 
+                       (update.effective_user.id, user_name, json.dumps(cart), total_price, datetime.now(TIMEZONE).isoformat()))
+        conn.commit()
+    
+    save_user_cart(update.effective_user.id, {})  # تفريغ السلة بعد تأكيد الطلب
+    
+    await query.edit_message_text("✅ تم إرسال طلبك للمراجعة!\n" + invoice_text, parse_mode=ParseMode.MARKDOWN)
 
-# --- 6. دوال إدارة الإضافة ---
-async def add_dept_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (كود دوال إدارة الإضافة)
+async def track_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # هنا يمكن إضافة الكود الخاص بتتبع الطلبات
+    await update.callback_query.answer("هذه الميزة قيد التطوير.")
 
-async def add_brand_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (كود دوال إدارة الإضافة)
+async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    with db_connect() as conn:
+        orders = conn.execute("SELECT * FROM orders WHERE user_id = ?", (user_id,)).fetchall()
+    
+    if not orders:
+        await update.callback_query.answer("لا توجد طلبات سابقة.", show_alert=True)
+        return
+    
+    orders_list = ""
+    for order in orders:
+        orders_list += f"طلب رقم: {order['id']}, المبلغ الإجمالي: {order['total_price']} ريال, الحالة: {order['status']}\n"
+    
+    await update.callback_query.edit_message_text("📋 طلباتك السابقة:\n" + orders_list)
 
-async def add_prod_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (كود دوال إدارة الإضافة)
-
-# --- 7. دوال تعديل/حذف ---
-async def edit_delete_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (كود دوال تعديل/حذف)
-
-# --- 8. دالة الإلغاء العامة والإعداد والتشغيل ---
-async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (كود دالة cancel_conv)
-
-def main() -> None:
+# --- 5. بدء التطبيق ---
+if __name__ == "__main__":
     setup_database()
     application = Application.builder().token(TOKEN).build()
-    
-    # إضافة معالجات الأوامر المحددة أولاً
-    application.add_handler(CommandHandler("start", start))
-    
-    # إضافة معالجات المحادثات
-    application.add_handler(add_dept_conv)
-    application.add_handler(add_brand_conv)
-    application.add_handler(add_prod_conv)
-    application.add_handler(edit_delete_conv)
-    application.add_handler(track_order_conv)
-    
-    # إضافة معالج الأزرار
-    application.add_handler(CallbackQueryHandler(unified_button_handler))
-    
-    # إضافة المعالج العام للنصوص في النهاية
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
-    # تشغيل البوت
-    logger.info("Starting bot with webhook...")
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(pattern="browse_departments", callback=show_brands_for_department))
+    application.add_handler(CallbackQueryHandler(pattern="view_cart", callback=view_cart))
+    application.add_handler(CallbackQueryHandler(pattern="add_(\d+)", callback=add_product_to_cart))
+    application.add_handler(CallbackQueryHandler(pattern="clear_cart", callback=clear_cart))
+    application.add_handler(CallbackQueryHandler(pattern="confirm_order", callback=confirm_order))
+    application.add_handler(CallbackQueryHandler(pattern="track_order_start", callback=track_order))
+    application.add_handler(CallbackQueryHandler(pattern="my_orders", callback=my_orders))
+
+    # إعداد Webhook
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path=TOKEN,
-        webhook_url=f"{WEB_URL}/{TOKEN}"
+        url_path=TOKEN
     )
-
-if __name__ == "__main__":
-    main()
+    application.bot.set_webhook(f"{WEB_URL}/{TOKEN}")
