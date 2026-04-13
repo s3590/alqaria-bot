@@ -176,8 +176,7 @@ async def show_products_for_brand(query, context, brand_id):
         return
     keyboard = [[InlineKeyboardButton(f"➕ {p['name']} ({int(p['price'])} ريال)", callback_data=f"add_{p['id']}")] for p in products]
     keyboard.append([InlineKeyboardButton("« العودة للأصناف", callback_data=f"department_{brand['department_id']}")])
-    await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
-
+    await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard),
 # --- 5. دوال لوحة تحكم المدير (محدثة بالكامل) ---
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -193,24 +192,23 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ... (تابع كتابة الدوال الأخرى مثل admin_add_menu و admin_edit_delete_menu)
+# --- 6. دوال إدارة الإضافة ---
+async def add_dept_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (كود دوال إدارة الإضافة)
+
+async def add_brand_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (كود دوال إدارة الإضافة)
+
+async def add_prod_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (كود دوال إدارة الإضافة)
+
+# --- 7. دوال تعديل/حذف ---
+async def edit_delete_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (كود دوال تعديل/حذف)
 
 # --- 8. دالة الإلغاء العامة والإعداد والتشغيل ---
 async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for key in list(context.user_data.keys()):
-        if key.startswith('new_') or key.startswith('admin_action') or key.startswith('product_to_edit'):
-            del context.user_data[key]
-    
-    query = update.callback_query
-    if query:
-        await query.answer()
-        if 'admin' in query.data:
-             await admin_panel(update, context)
-        else:
-             await start(update, context)
-    else:
-        await start(update, context)
-    return ConversationHandler.END
+    # ... (كود دالة cancel_conv)
 
 def main() -> None:
     setup_database()
