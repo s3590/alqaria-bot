@@ -1,4 +1,3 @@
-# --- بقالة القرية الذكية - الإصدار 16.1 (محدث) ---
 import logging
 import os
 import sqlite3
@@ -84,9 +83,89 @@ def get_product_details(prod_id):
     with db_connect() as conn:
         return conn.execute("SELECT p.id, p.name, p.price, p.delivery_fee, p.description, b.name as brand_name, d.name as department_name FROM products p JOIN brands b ON p.brand_id = b.id JOIN departments d ON b.department_id = d.id WHERE p.id = ?", (prod_id,)).fetchone()
 
-# ... (بقية الدوال لم تتغير)
+def escape_markdown(text: str) -> str:
+    if not isinstance(text, str): text = str(text)
+    return re.sub(r'([_*\[\]()~`>#\+\-=|{}.!])', r'\\\1', text)
+
+def format_invoice(cart: dict) -> tuple[str, int, int]:
+    if not cart: return "", 0, 0
+    invoice_text = "```\n" + "الصنف".ljust(15) + "الكمية".ljust(8) + "السعر".ljust(9) + "الإجمالي".ljust(10) + "\n" + "-" * 42 + "\n"
+    total_items_price, total_delivery_price = 0, 0
+    for p_id, qty in cart.items():
+        item = get_product_details(p_id)
+        if item:
+            item_total = item["price"] * qty
+            total_items_price += item_total
+            total_delivery_price += item["delivery_fee"] * qty
+            invoice_text += f"{item['brand_name'][:14].ljust(15)}{str(qty).ljust(8)}{str(int(item['price'])).ljust(9)}{str(int(item_total)).ljust(10)}\n"
+            invoice_text += f"  ({item['name']})".ljust(42) + "\n"
+    invoice_text += "```\n*ملخص الفاتورة:*\n" + f"🛍️ *إجمالي المشتريات:* {int(total_items_price)} ريال\n" + f"🚚 *إجمالي التوصيل:* {int(total_delivery_price)} ريال\n" + f"*{'=' * 25}*\n" + f"💰 *المبلغ الإجمالي: {int(total_items_price + total_delivery_price)} ريال*"
+    return invoice_text, total_items_price + total_delivery_price, total_delivery_price
+
+def get_user_cart(user_id: int) -> dict:
+    with db_connect() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
+        cart_json = cursor.execute("SELECT cart FROM users WHERE id = ?", (user_id,)).fetchone()['cart']
+        return json.loads(cart_json)
+
+def save_user_cart(user_id: int, cart: dict):
+    with db_connect() as conn:
+        conn.execute("UPDATE users SET cart = ? WHERE id = ?", (json.dumps(cart), user_id))
+        conn.commit()
+
+def update_order_status(order_id: int, new_status: str, actor: str = "النظام"):
+    with db_connect() as conn:
+        order = conn.execute("SELECT status_history FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if not order: return
+        history = json.loads(order['status_history'])
+        history.append({"status": new_status, "date": datetime.now(TIMEZONE).isoformat(), "actor": actor})
+        conn.execute("UPDATE orders SET status = ?, status_history = ? WHERE id = ?", (new_status, json.dumps(history), order_id))
+        conn.commit()
 
 # --- 4. دوال الواجهة الرئيسية والفرعية ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    welcome_message = "🏪 أهلاً بك في بقالة القرية الذكية!\n\nاختر من القائمة أدناه، أو اكتب طلبك مباشرة."
+    keyboard = [
+        [InlineKeyboardButton("🛒 تصفح المنتجات", callback_data="browse_departments")],
+        [InlineKeyboardButton("🛍️ عرض سلتي", callback_data="view_cart")],
+        [InlineKeyboardButton("📦 تتبع طلبي", callback_data="track_order_start")],
+        [InlineKeyboardButton("📋 طلباتي السابقة", callback_data="my_orders")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+
+async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    cart = get_user_cart(update.effective_user.id)
+    if not cart:
+        msg, markup = "سلتك فارغة حالياً!", InlineKeyboardMarkup([[InlineKeyboardButton("« تسوق الآن", callback_data="browse_departments")]])
+    else:
+        invoice_text, _, _ = format_invoice(cart)
+        msg = "🛒 *فاتورتك الحالية:*\n" + invoice_text
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ إرسال الطلب للمراجعة", callback_data="confirm_order")],
+            [InlineKeyboardButton("🗑️ تفريغ السلة", callback_data="clear_cart")],
+            [InlineKeyboardButton("« متابعة التسوق", callback_data="browse_departments")]
+        ])
+    try:
+        if query: await query.edit_message_text(msg, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+        else: await update.message.reply_text(msg, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    except TelegramError as e:
+        if "message is not modified" not in str(e).lower(): logger.error(f"Error in view_cart: {e}")
+
+async def show_brands_for_department(query, context, department_id):
+    with db_connect() as conn:
+        brands = conn.execute("SELECT * FROM brands WHERE department_id = ?", (department_id,)).fetchall()
+        department_name = conn.execute("SELECT name FROM departments WHERE id = ?", (department_id,)).fetchone()['name']
+    caption = f"اختر الصنف المطلوب من *{escape_markdown(department_name)}*:"
+    if not brands:
+        await query.answer("لا توجد أصناف في هذا القسم بعد.", show_alert=True)
+        return
+    keyboard = [[InlineKeyboardButton(b['name'], callback_data=f"brand_{b['id']}")] for b in brands]
+    keyboard.append([InlineKeyboardButton("« العودة للأقسام", callback_data="browse_departments")])
+    await query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
+
 async def show_products_for_brand(query, context, brand_id):
     with db_connect() as conn:
         products = conn.execute("SELECT * FROM products WHERE brand_id = ? ORDER BY price", (brand_id,)).fetchall()
@@ -114,7 +193,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ... (بقية الدوال لم تتغير)
+# ... (تابع كتابة الدوال الأخرى مثل admin_add_menu و admin_edit_delete_menu)
 
 # --- 8. دالة الإلغاء العامة والإعداد والتشغيل ---
 async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,8 +216,23 @@ def main() -> None:
     setup_database()
     application = Application.builder().token(TOKEN).build()
     
-    # ... (تسجيل المحادثات، إضافة الدوال، إلخ)
+    # إضافة معالجات الأوامر المحددة أولاً
+    application.add_handler(CommandHandler("start", start))
+    
+    # إضافة معالجات المحادثات
+    application.add_handler(add_dept_conv)
+    application.add_handler(add_brand_conv)
+    application.add_handler(add_prod_conv)
+    application.add_handler(edit_delete_conv)
+    application.add_handler(track_order_conv)
+    
+    # إضافة معالج الأزرار
+    application.add_handler(CallbackQueryHandler(unified_button_handler))
+    
+    # إضافة المعالج العام للنصوص في النهاية
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
+    # تشغيل البوت
     logger.info("Starting bot with webhook...")
     application.run_webhook(
         listen="0.0.0.0",
